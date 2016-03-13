@@ -29,20 +29,19 @@ func Listen(n string, laddr *Addr) (*Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := &baseConn{
-		conn: conn,
-	}
+	b := newBaseConn(conn)
 	l := &Listener{
 		RawConn: b,
 		conn:    b,
 	}
+	go b.listen()
 	return l, nil
 }
 
 // AcceptUTP accepts the next incoming call and returns the new
 // connection.
 func (l *Listener) AcceptUTP() (*Conn, error) {
-	return nil, nil
+	return l.conn.accept()
 }
 
 /*

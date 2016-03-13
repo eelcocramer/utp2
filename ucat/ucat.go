@@ -9,6 +9,7 @@ import (
 func main() {
 	addr, err := utp.ResolveAddr("utp", "")
 	listener, err := utp.Listen("utp", addr)
+	fmt.Println(listener.RawConn.LocalAddr(), err)
 	conn, err := listener.AcceptUTP()
-	fmt.Print(listener, conn, err)
+	fmt.Println(conn)
 }

@@ -1,12 +1,22 @@
 package utp
 
 import (
+	"fmt"
 	"net"
 	"time"
 )
 
 type baseConn struct {
 	conn net.PacketConn
+
+	acceptCh chan *Conn
+}
+
+func newBaseConn(conn net.PacketConn) *baseConn {
+	return &baseConn{
+		conn:     conn,
+		acceptCh: make(chan *Conn),
+	}
 }
 
 func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
@@ -22,7 +32,7 @@ func (c *baseConn) Close() error {
 }
 
 func (c *baseConn) LocalAddr() net.Addr {
-	return nil
+	return &Addr{Addr: c.conn.LocalAddr()}
 }
 
 func (c *baseConn) SetDeadline(t time.Time) error {
@@ -35,6 +45,23 @@ func (c *baseConn) SetReadDeadline(t time.Time) error {
 
 func (c *baseConn) SetWriteDeadline(t time.Time) error {
 	return nil
+}
+
+func (c *baseConn) listen() {
+	for {
+		var buf [maxUdpPayload]byte
+		n, addr, err := c.conn.ReadFrom(buf[:])
+		fmt.Println(n, addr, err)
+		c.acceptCh <- &Conn{}
+	}
+}
+
+func (c *baseConn) accept() (*Conn, error) {
+	conn := <-c.acceptCh
+	if conn != nil {
+		return conn, nil
+	}
+	return nil, errClosing
 }
 
 /*
