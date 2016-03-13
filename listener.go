@@ -1,4 +1,24 @@
 package utp
+
+import "net"
+
+// Listener is a UTP network listener.  Clients should typically
+// use variables of type Listener instead of assuming UTP.
+type Listener struct {
+	// RawConn represents an out-of-band connection.
+	// This allows a single socket to handle multiple protocols.
+	RawConn net.PacketConn
+}
+
+// Listen announces on the UTP address laddr and returns a UTP
+// listener.  Net must be "utp", "utp4", or "utp6".  If laddr has a
+// port of 0, ListenUTP will choose an available port.  The caller can
+// use the Addr method of Listener to retrieve the chosen address.
+func Listen(n string, laddr *Addr) (*Listener, error) {
+	l := &Listener{}
+	return l, nil
+}
+
 /*
 import (
 	"math"
