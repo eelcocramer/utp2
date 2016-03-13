@@ -8,6 +8,8 @@ type Listener struct {
 	// RawConn represents an out-of-band connection.
 	// This allows a single socket to handle multiple protocols.
 	RawConn net.PacketConn
+
+	conn *baseConn
 }
 
 // Listen announces on the UTP address laddr and returns a UTP
@@ -15,8 +17,32 @@ type Listener struct {
 // port of 0, ListenUTP will choose an available port.  The caller can
 // use the Addr method of Listener to retrieve the chosen address.
 func Listen(n string, laddr *Addr) (*Listener, error) {
-	l := &Listener{}
+	udpnet, err := utp2udp(n)
+	if err != nil {
+		return nil, err
+	}
+	s := ":0"
+	if laddr != nil {
+		s = laddr.String()
+	}
+	conn, err := net.ListenPacket(udpnet, s)
+	if err != nil {
+		return nil, err
+	}
+	b := &baseConn{
+		conn: conn,
+	}
+	l := &Listener{
+		RawConn: b,
+		conn:    b,
+	}
 	return l, nil
+}
+
+// AcceptUTP accepts the next incoming call and returns the new
+// connection.
+func (l *Listener) AcceptUTP() (*Conn, error) {
+	return nil, nil
 }
 
 /*

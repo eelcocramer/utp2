@@ -1,5 +1,10 @@
 package utp
 
+// Conn is an implementation of the Conn interface for UTP network
+// connections.
+type Conn struct {
+}
+
 /*
 import (
 	"math"

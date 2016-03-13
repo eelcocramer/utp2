@@ -9,5 +9,6 @@ import (
 func main() {
 	addr, err := utp.ResolveAddr("utp", "")
 	listener, err := utp.Listen("utp", addr)
-	fmt.Print(listener, err)
+	conn, err := listener.AcceptUTP()
+	fmt.Print(listener, conn, err)
 }
