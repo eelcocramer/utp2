@@ -1,6 +1,7 @@
 package utp
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -52,6 +53,8 @@ func (c *baseConn) listen() {
 		var buf [maxUdpPayload]byte
 		n, addr, err := c.conn.ReadFrom(buf[:])
 		fmt.Println(n, addr, err)
+		p, err := c.decodePacket(buf[:n])
+		fmt.Println(p, err)
 		c.acceptCh <- &Conn{}
 	}
 }
@@ -62,6 +65,18 @@ func (c *baseConn) accept() (*Conn, error) {
 		return conn, nil
 	}
 	return nil, errClosing
+}
+
+func (c *baseConn) decodePacket(b []byte) (*packet, error) {
+	var p packet
+	err := p.UnmarshalBinary(b)
+	if err != nil {
+		return nil, err
+	}
+	if p.header.ver != version {
+		return nil, errors.New("unsupported utp version")
+	}
+	return &p, nil
 }
 
 /*
