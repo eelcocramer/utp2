@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -11,21 +12,44 @@ type baseConn struct {
 	conn net.PacketConn
 
 	acceptCh chan *Conn
+
+	outOfBandPackets []outOfBandPacket
+	outOfBandMutex   sync.Mutex
+	outOfBandCond    *sync.Cond
+}
+
+type outOfBandPacket struct {
+	addr net.Addr
+	b    []byte
 }
 
 func newBaseConn(conn net.PacketConn) *baseConn {
-	return &baseConn{
+	b := &baseConn{
 		conn:     conn,
 		acceptCh: make(chan *Conn),
 	}
+	b.outOfBandCond = sync.NewCond(&b.outOfBandMutex)
+	return b
 }
 
 func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	return 0, nil, nil
+	c.outOfBandMutex.Lock()
+	for {
+		if len(c.outOfBandPackets) > 0 {
+			defer func() {
+				c.outOfBandPackets = c.outOfBandPackets[1:]
+				c.outOfBandMutex.Unlock()
+			}()
+			p := c.outOfBandPackets[0]
+			return copy(b, p.b), p.addr, nil
+		}
+		c.outOfBandCond.Wait()
+	}
+	return 0, nil, errClosing
 }
 
 func (c *baseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
-	return 0, nil
+	return c.conn.WriteTo(b, addr)
 }
 
 func (c *baseConn) Close() error {
@@ -54,6 +78,15 @@ func (c *baseConn) listen() {
 		n, addr, err := c.conn.ReadFrom(buf[:])
 		fmt.Println(n, addr, err)
 		p, err := c.decodePacket(buf[:n])
+		//if err != nil {
+		c.outOfBandMutex.Lock()
+		c.outOfBandPackets = append(c.outOfBandPackets, outOfBandPacket{
+			b:    buf[:n],
+			addr: addr,
+		})
+		c.outOfBandCond.Signal()
+		c.outOfBandMutex.Unlock()
+		//}
 		fmt.Println(p, err)
 		c.acceptCh <- &Conn{}
 	}
