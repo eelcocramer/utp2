@@ -7,13 +7,17 @@ import (
 )
 
 func main() {
-	addr, err := utp.ResolveAddr("utp", "")
-	listener, err := utp.Listen("utp", addr)
-	fmt.Println(listener.RawConn.LocalAddr(), err)
+  for {
+    addr, err := utp.ResolveAddr("utp", "")
+    listener, err := utp.Listen("utp", addr)
+    fmt.Println(listener.RawConn.LocalAddr(), err)
 
-	b := make([]byte, 500)
-	n, addrx, err := listener.RawConn.ReadFrom(b)
-	fmt.Println(n, addrx, err)
+    b := make([]byte, 500)
+    listener.RawConn.Close()
+    n, addrx, err := listener.RawConn.ReadFrom(b)
+    fmt.Println(n, addrx, err)
+  }
+
 	//conn, err := listener.AcceptUTP()
 	//fmt.Println(conn)
 }

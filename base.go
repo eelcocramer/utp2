@@ -11,11 +11,13 @@ import (
 type baseConn struct {
 	conn net.PacketConn
 
-	acceptCh chan *Conn
+	acceptCh  chan *Conn
+	closeChan chan int
 
 	outOfBandPackets []outOfBandPacket
 	outOfBandMutex   sync.Mutex
 	outOfBandCond    *sync.Cond
+	outOfBandChan    chan *outOfBandPacket
 }
 
 type outOfBandPacket struct {
@@ -24,26 +26,52 @@ type outOfBandPacket struct {
 }
 
 func newBaseConn(conn net.PacketConn) *baseConn {
-	b := &baseConn{
-		conn:     conn,
-		acceptCh: make(chan *Conn),
+	c := &baseConn{
+		conn:          conn,
+		acceptCh:      make(chan *Conn),
+		closeChan:     make(chan int),
+		outOfBandChan: make(chan *outOfBandPacket),
 	}
-	b.outOfBandCond = sync.NewCond(&b.outOfBandMutex)
-	return b
+	c.outOfBandCond = sync.NewCond(&c.outOfBandMutex)
+
+	go func() {
+		for {
+			c.outOfBandMutex.Lock()
+			select {
+			case <-c.closeChan:
+				close(c.outOfBandChan)
+				c.outOfBandMutex.Unlock()
+				return
+			default:
+			}
+			for {
+				if len(c.outOfBandPackets) > 0 {
+					defer func() {
+						c.outOfBandPackets = c.outOfBandPackets[1:]
+						c.outOfBandMutex.Unlock()
+					}()
+					c.outOfBandChan <- &c.outOfBandPackets[0]
+					break
+				}
+				c.outOfBandCond.Wait()
+				select {
+				case <-c.closeChan:
+					close(c.outOfBandChan)
+					c.outOfBandMutex.Unlock()
+					return
+				default:
+				}
+			}
+		}
+	}()
+
+	return c
 }
 
 func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	c.outOfBandMutex.Lock()
-	for {
-		if len(c.outOfBandPackets) > 0 {
-			defer func() {
-				c.outOfBandPackets = c.outOfBandPackets[1:]
-				c.outOfBandMutex.Unlock()
-			}()
-			p := c.outOfBandPackets[0]
-			return copy(b, p.b), p.addr, nil
-		}
-		c.outOfBandCond.Wait()
+	p := <-c.outOfBandChan
+	if p != nil {
+		return copy(b, p.b), p.addr, nil
 	}
 	return 0, nil, errClosing
 }
@@ -53,6 +81,16 @@ func (c *baseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
 }
 
 func (c *baseConn) Close() error {
+	select {
+	case <-c.closeChan:
+		return errClosing
+	default:
+		c.outOfBandMutex.Lock()
+		close(c.closeChan)
+		c.outOfBandCond.Broadcast()
+		c.conn.Close()
+		c.outOfBandMutex.Unlock()
+	}
 	return nil
 }
 
@@ -78,15 +116,15 @@ func (c *baseConn) listen() {
 		n, addr, err := c.conn.ReadFrom(buf[:])
 		fmt.Println(n, addr, err)
 		p, err := c.decodePacket(buf[:n])
-		//if err != nil {
-		c.outOfBandMutex.Lock()
-		c.outOfBandPackets = append(c.outOfBandPackets, outOfBandPacket{
-			b:    buf[:n],
-			addr: addr,
-		})
-		c.outOfBandCond.Signal()
-		c.outOfBandMutex.Unlock()
-		//}
+		if err != nil {
+			c.outOfBandMutex.Lock()
+			c.outOfBandPackets = append(c.outOfBandPackets, outOfBandPacket{
+				b:    buf[:n],
+				addr: addr,
+			})
+			c.outOfBandCond.Signal()
+			c.outOfBandMutex.Unlock()
+		}
 		fmt.Println(p, err)
 		c.acceptCh <- &Conn{}
 	}
