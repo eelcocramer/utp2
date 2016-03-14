@@ -37,13 +37,6 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 	go func() {
 		for {
 			c.outOfBandMutex.Lock()
-			select {
-			case <-c.closeChan:
-				close(c.outOfBandChan)
-				c.outOfBandMutex.Unlock()
-				return
-			default:
-			}
 			for {
 				if len(c.outOfBandPackets) > 0 {
 					defer func() {
@@ -53,7 +46,6 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 					c.outOfBandChan <- &c.outOfBandPackets[0]
 					break
 				}
-				c.outOfBandCond.Wait()
 				select {
 				case <-c.closeChan:
 					close(c.outOfBandChan)
@@ -61,6 +53,7 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 					return
 				default:
 				}
+				c.outOfBandCond.Wait()
 			}
 		}
 	}()
