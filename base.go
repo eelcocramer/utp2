@@ -11,16 +11,17 @@ import (
 type baseConn struct {
 	conn net.PacketConn
 
+	recvChan chan *udpPacket
 	acceptCh  chan *Conn
 	closeChan chan int
 
-	outOfBandPackets []outOfBandPacket
+	udpPackets []udpPacket
 	outOfBandMutex   sync.Mutex
 	outOfBandCond    *sync.Cond
-	outOfBandChan    chan *outOfBandPacket
+	outOfBandChan    chan *udpPacket
 }
 
-type outOfBandPacket struct {
+type udpPacket struct {
 	addr net.Addr
 	b    []byte
 }
@@ -28,9 +29,10 @@ type outOfBandPacket struct {
 func newBaseConn(conn net.PacketConn) *baseConn {
 	c := &baseConn{
 		conn:          conn,
+		recvChan:      make(chan *udpPacket),
 		acceptCh:      make(chan *Conn),
 		closeChan:     make(chan int),
-		outOfBandChan: make(chan *outOfBandPacket),
+		outOfBandChan: make(chan *udpPacket),
 	}
 	c.outOfBandCond = sync.NewCond(&c.outOfBandMutex)
 
@@ -38,18 +40,19 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 		for {
 			c.outOfBandMutex.Lock()
 			for {
-				if len(c.outOfBandPackets) > 0 {
+				if len(c.udpPackets) > 0 {
 					defer func() {
-						c.outOfBandPackets = c.outOfBandPackets[1:]
+						c.udpPackets = c.udpPackets[1:]
 						c.outOfBandMutex.Unlock()
 					}()
-					c.outOfBandChan <- &c.outOfBandPackets[0]
+					c.outOfBandChan <- &c.udpPackets[0]
 					break
 				}
 				select {
 				case <-c.closeChan:
 					close(c.outOfBandChan)
 					c.outOfBandMutex.Unlock()
+					fmt.Println("rttrtrt")
 					return
 				default:
 				}
@@ -104,23 +107,40 @@ func (c *baseConn) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *baseConn) listen() {
+
 	for {
 		var buf [maxUdpPayload]byte
 		n, addr, err := c.conn.ReadFrom(buf[:])
-		fmt.Println(n, addr, err)
-		p, err := c.decodePacket(buf[:n])
 		if err != nil {
-			c.outOfBandMutex.Lock()
-			c.outOfBandPackets = append(c.outOfBandPackets, outOfBandPacket{
-				b:    buf[:n],
-				addr: addr,
-			})
-			c.outOfBandCond.Signal()
-			c.outOfBandMutex.Unlock()
+			close(c.recvChan)
+			return
 		}
-		fmt.Println(p, err)
-		c.acceptCh <- &Conn{}
+		c.recvChan <- &udpPacket{addr: addr, b: buf[:n]}
 	}
+
+	go func() {
+		for {
+			u := <- c.recvChan
+			if u == nil {
+				close(c.outOfBandChan)
+				close(c.acceptCh)
+				return
+			}
+
+			p, err := c.decodePacket(u.b)
+			if err != nil {
+				c.outOfBandMutex.Lock()
+				c.udpPackets = append(c.udpPackets, udpPacket{
+					b:    u.b,
+					addr: u.addr,
+				})
+				c.outOfBandCond.Signal()
+				c.outOfBandMutex.Unlock()
+			}
+			fmt.Println(p, err)
+			c.acceptCh <- &Conn{}
+		}
+	}()
 }
 
 func (c *baseConn) accept() (*Conn, error) {
@@ -165,7 +185,7 @@ type baseConn struct {
 	addr             string
 	conn             net.PacketConn
 	synPackets       *packetRingBuffer
-	outOfBandPackets *packetRingBuffer
+	udpPackets *packetRingBuffer
 
 	handlers     map[uint16]*packetHandler
 	handlerMutex sync.RWMutex
@@ -197,7 +217,7 @@ func newBaseConn(n string, addr *Addr) (*baseConn, error) {
 	c := &baseConn{
 		conn:             conn,
 		synPackets:       newPacketRingBuffer(packetBufferSize),
-		outOfBandPackets: newPacketRingBuffer(packetBufferSize),
+		udpPackets: newPacketRingBuffer(packetBufferSize),
 		handlers:         make(map[uint16]*packetHandler),
 	}
 	c.Register(-1, nil)
@@ -255,7 +275,7 @@ func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 			d = 0
 		}
 	}
-	p, err := c.outOfBandPackets.popOne(d)
+	p, err := c.udpPackets.popOne(d)
 	if err != nil {
 		return 0, nil, &net.OpError{
 			Op:   "read",
@@ -337,7 +357,7 @@ func (c *baseConn) recvLoop() {
 		p, err := c.decodePacket(buf[:l])
 		if err != nil {
 			ulog.Printf(3, "baseConn(%v): RECV out-of-band packet (len: %d) from %v", c.LocalAddr(), l, addr)
-			c.outOfBandPackets.push(&packet{payload: append([]byte{}, buf[:l]...), addr: addr})
+			c.udpPackets.push(&packet{payload: append([]byte{}, buf[:l]...), addr: addr})
 		} else {
 			p.addr = addr
 			ulog.Printf(3, "baseConn(%v): RECV: %v from %v", c.LocalAddr(), p, addr)
