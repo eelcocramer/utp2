@@ -19,6 +19,6 @@ func main() {
 		listener.RawConn.Close()
 		n, addrx, err := listener.RawConn.ReadFrom(b)
 		fmt.Println(n, addrx, err, "*", runtime.NumGoroutine())
-		
+		listener.AcceptUTP()
 	}
 }

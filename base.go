@@ -11,14 +11,14 @@ import (
 type baseConn struct {
 	conn net.PacketConn
 
-	recvChan chan *udpPacket
-	acceptCh  chan *Conn
-	closeChan chan int
+	recvChan   chan *udpPacket
+	acceptChan chan *Conn
+	closeChan  chan int
 
-	udpPackets []udpPacket
-	outOfBandMutex   sync.Mutex
-	outOfBandCond    *sync.Cond
-	outOfBandChan    chan *udpPacket
+	udpPackets     []udpPacket
+	outOfBandMutex sync.Mutex
+	outOfBandCond  *sync.Cond
+	outOfBandChan  chan *udpPacket
 }
 
 type udpPacket struct {
@@ -30,37 +30,10 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 	c := &baseConn{
 		conn:          conn,
 		recvChan:      make(chan *udpPacket),
-		acceptCh:      make(chan *Conn),
+		acceptChan:    make(chan *Conn),
 		closeChan:     make(chan int),
 		outOfBandChan: make(chan *udpPacket),
 	}
-	c.outOfBandCond = sync.NewCond(&c.outOfBandMutex)
-
-	go func() {
-		for {
-			c.outOfBandMutex.Lock()
-			for {
-				if len(c.udpPackets) > 0 {
-					defer func() {
-						c.udpPackets = c.udpPackets[1:]
-						c.outOfBandMutex.Unlock()
-					}()
-					c.outOfBandChan <- &c.udpPackets[0]
-					break
-				}
-				select {
-				case <-c.closeChan:
-					close(c.outOfBandChan)
-					c.outOfBandMutex.Unlock()
-					fmt.Println("rttrtrt")
-					return
-				default:
-				}
-				c.outOfBandCond.Wait()
-			}
-		}
-	}()
-
 	return c
 }
 
@@ -81,11 +54,8 @@ func (c *baseConn) Close() error {
 	case <-c.closeChan:
 		return errClosing
 	default:
-		c.outOfBandMutex.Lock()
 		close(c.closeChan)
-		c.outOfBandCond.Broadcast()
 		c.conn.Close()
-		c.outOfBandMutex.Unlock()
 	}
 	return nil
 }
@@ -107,6 +77,24 @@ func (c *baseConn) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *baseConn) listen() {
+	go func() {
+		for {
+			u := <-c.recvChan
+			if u == nil {
+				close(c.outOfBandChan)
+				close(c.acceptChan)
+				return
+			}
+
+			p, err := c.decodePacket(u.b)
+			if err != nil {
+				c.outOfBandChan <- &udpPacket{b: u.b, addr: u.addr}
+			} else {
+				fmt.Println(p)
+				c.acceptChan <- &Conn{}
+			}
+		}
+	}()
 
 	for {
 		var buf [maxUdpPayload]byte
@@ -117,34 +105,10 @@ func (c *baseConn) listen() {
 		}
 		c.recvChan <- &udpPacket{addr: addr, b: buf[:n]}
 	}
-
-	go func() {
-		for {
-			u := <- c.recvChan
-			if u == nil {
-				close(c.outOfBandChan)
-				close(c.acceptCh)
-				return
-			}
-
-			p, err := c.decodePacket(u.b)
-			if err != nil {
-				c.outOfBandMutex.Lock()
-				c.udpPackets = append(c.udpPackets, udpPacket{
-					b:    u.b,
-					addr: u.addr,
-				})
-				c.outOfBandCond.Signal()
-				c.outOfBandMutex.Unlock()
-			}
-			fmt.Println(p, err)
-			c.acceptCh <- &Conn{}
-		}
-	}()
 }
 
 func (c *baseConn) accept() (*Conn, error) {
-	conn := <-c.acceptCh
+	conn := <-c.acceptChan
 	if conn != nil {
 		return conn, nil
 	}
