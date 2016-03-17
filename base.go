@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sync"
+	"syscall"
 	"time"
 )
 
@@ -15,10 +15,8 @@ type baseConn struct {
 	acceptChan chan *Conn
 	closeChan  chan int
 
-	udpPackets     []udpPacket
-	outOfBandMutex sync.Mutex
-	outOfBandCond  *sync.Cond
-	outOfBandChan  chan *udpPacket
+	udpPackets    []udpPacket
+	outOfBandChan chan *udpPacket
 }
 
 type udpPacket struct {
@@ -37,7 +35,12 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 	return c
 }
 
+func (c *baseConn) ok() bool { return c != nil && c.conn != nil }
+
 func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
+	if !c.ok() {
+		return 0, nil, syscall.EINVAL
+	}
 	p := <-c.outOfBandChan
 	if p != nil {
 		return copy(b, p.b), p.addr, nil
@@ -46,10 +49,16 @@ func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 }
 
 func (c *baseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
+	if !c.ok() {
+		return 0, syscall.EINVAL
+	}
 	return c.conn.WriteTo(b, addr)
 }
 
 func (c *baseConn) Close() error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
 	select {
 	case <-c.closeChan:
 		return errClosing
@@ -65,14 +74,23 @@ func (c *baseConn) LocalAddr() net.Addr {
 }
 
 func (c *baseConn) SetDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
 	return nil
 }
 
 func (c *baseConn) SetReadDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
 	return nil
 }
 
 func (c *baseConn) SetWriteDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
 	return nil
 }
 
