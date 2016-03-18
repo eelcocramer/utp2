@@ -11,12 +11,12 @@ import (
 type baseConn struct {
 	conn net.PacketConn
 
-	recvChan   chan *udpPacket
-	acceptChan chan *Conn
-	closeChan  chan int
+	recvChan  chan *udpPacket
+	closeChan chan int
 
 	udpPackets   []udpPacket
 	outOfBandBuf *buffer
+	incomingBuf  *buffer
 }
 
 type udpPacket struct {
@@ -28,9 +28,9 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 	c := &baseConn{
 		conn:         conn,
 		recvChan:     make(chan *udpPacket),
-		acceptChan:   make(chan *Conn),
 		closeChan:    make(chan int),
 		outOfBandBuf: newBuffer(outOfBandBufferSize),
+		incomingBuf:  newBuffer(incomingBufferSize),
 	}
 	return c
 }
@@ -100,7 +100,7 @@ func (c *baseConn) listen() {
 			u := <-c.recvChan
 			if u == nil {
 				c.outOfBandBuf.Close()
-				close(c.acceptChan)
+				c.incomingBuf.Close()
 				return
 			}
 
@@ -109,7 +109,7 @@ func (c *baseConn) listen() {
 				c.outOfBandBuf.Push(&udpPacket{b: u.b, addr: u.addr})
 			} else {
 				fmt.Println(p)
-				c.acceptChan <- &Conn{}
+				c.incomingBuf.Push(&Conn{})
 			}
 		}
 	}()
@@ -126,8 +126,8 @@ func (c *baseConn) listen() {
 }
 
 func (c *baseConn) accept() (*Conn, error) {
-	conn := <-c.acceptChan
-	if conn != nil {
+	i := c.incomingBuf.Pop()
+	if conn, ok := i.(*Conn); ok {
 		return conn, nil
 	}
 	return nil, errClosing

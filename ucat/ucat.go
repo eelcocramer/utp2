@@ -17,10 +17,10 @@ func main() {
 		listener, err := utp.Listen("utp", addr)
 		fmt.Println(listener.RawConn.LocalAddr(), err)
 
-		b := make([]byte, 500)
+		//b := make([]byte, 500)
 		//listener.RawConn.Close()
-		n, addrx, err := listener.RawConn.ReadFrom(b)
-		fmt.Println(n, addrx, err, "*", runtime.NumGoroutine())
+		//, addrx, err := listener.RawConn.ReadFrom(b)
+		//fmt.Println(n, addrx, err, "*", runtime.NumGoroutine())
 		listener.AcceptUTP()
 	}
 }

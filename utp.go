@@ -32,6 +32,7 @@ const (
 	maxRetry         = 3
 
 	outOfBandBufferSize = 128
+	incomingBufferSize  = 128
 
 	maxUdpPayload = 65507
 	resetTimeout  = time.Second
