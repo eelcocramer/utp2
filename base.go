@@ -30,7 +30,7 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 		recvChan:     make(chan *udpPacket),
 		acceptChan:   make(chan *Conn),
 		closeChan:    make(chan int),
-		outOfBandBuf: newBuffer(128),
+		outOfBandBuf: newBuffer(outOfBandBufferSize),
 	}
 	return c
 }
