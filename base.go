@@ -95,33 +95,22 @@ func (c *baseConn) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *baseConn) listen() {
-	go func() {
-		for {
-			u := <-c.recvChan
-			if u == nil {
-				c.outOfBandBuf.Close()
-				c.incomingBuf.Close()
-				return
-			}
-
-			p, err := c.decodePacket(u.b)
-			if err != nil {
-				c.outOfBandBuf.Push(&udpPacket{b: u.b, addr: u.addr})
-			} else {
-				fmt.Println(p)
-				c.incomingBuf.Push(&Conn{})
-			}
-		}
-	}()
-
 	for {
 		var buf [maxUdpPayload]byte
 		n, addr, err := c.conn.ReadFrom(buf[:])
 		if err != nil {
-			close(c.recvChan)
+			c.outOfBandBuf.Close()
+			c.incomingBuf.Close()
 			return
 		}
-		c.recvChan <- &udpPacket{addr: addr, b: buf[:n]}
+
+		p, err := c.decodePacket(buf[:n])
+		if err != nil {
+			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
+		} else {
+			fmt.Println(p)
+			c.incomingBuf.Push(&Conn{})
+		}
 	}
 }
 
