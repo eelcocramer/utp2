@@ -13,7 +13,7 @@ type buffer struct {
 	closed     bool
 }
 
-func NewBuffer(size int) *buffer {
+func newBuffer(size int) *buffer {
 	b := &buffer{
 		pushChan: make(chan interface{}),
 		popChan:  make(chan interface{}),

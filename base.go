@@ -15,8 +15,8 @@ type baseConn struct {
 	acceptChan chan *Conn
 	closeChan  chan int
 
-	udpPackets    []udpPacket
-	outOfBandChan chan *udpPacket
+	udpPackets   []udpPacket
+	outOfBandBuf *buffer
 }
 
 type udpPacket struct {
@@ -26,11 +26,11 @@ type udpPacket struct {
 
 func newBaseConn(conn net.PacketConn) *baseConn {
 	c := &baseConn{
-		conn:          conn,
-		recvChan:      make(chan *udpPacket),
-		acceptChan:    make(chan *Conn),
-		closeChan:     make(chan int),
-		outOfBandChan: make(chan *udpPacket),
+		conn:         conn,
+		recvChan:     make(chan *udpPacket),
+		acceptChan:   make(chan *Conn),
+		closeChan:    make(chan int),
+		outOfBandBuf: newBuffer(128),
 	}
 	return c
 }
@@ -41,8 +41,8 @@ func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	if !c.ok() {
 		return 0, nil, syscall.EINVAL
 	}
-	p := <-c.outOfBandChan
-	if p != nil {
+	i := c.outOfBandBuf.Pop()
+	if p, ok := i.(*udpPacket); ok {
 		return copy(b, p.b), p.addr, nil
 	}
 	return 0, nil, errClosing
@@ -99,14 +99,14 @@ func (c *baseConn) listen() {
 		for {
 			u := <-c.recvChan
 			if u == nil {
-				close(c.outOfBandChan)
+				c.outOfBandBuf.Close()
 				close(c.acceptChan)
 				return
 			}
 
 			p, err := c.decodePacket(u.b)
 			if err != nil {
-				c.outOfBandChan <- &udpPacket{b: u.b, addr: u.addr}
+				c.outOfBandBuf.Push(&udpPacket{b: u.b, addr: u.addr})
 			} else {
 				fmt.Println(p)
 				c.acceptChan <- &Conn{}
