@@ -17,14 +17,11 @@ func main() {
 	numcpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(numcpu)
 
+	addr, err := utp.ResolveAddr("utp", "")
+	listener, err := utp.Listen("utp", addr)
+	fmt.Println(listener.RawConn.LocalAddr(), err)
+
+	listener.AcceptUTP()
 	for {
-
-		addr, err := utp.ResolveAddr("utp", "")
-		listener, err := utp.Listen("utp", addr)
-		fmt.Println(listener.RawConn.LocalAddr(), err)
-
-		listener.AcceptUTP()
-		listener.AcceptUTP()
-
 	}
 }

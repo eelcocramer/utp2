@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -54,13 +55,14 @@ func (l *Listener) AcceptUTP() (net.Conn, error) {
 
 type listenerBaseConn struct {
 	conn    net.PacketConn
-	sockets []*listenerConn
+	sockets map[uint16]*listenerConn
 
 	recvChan  chan *udpPacket
 	closeChan chan int
 
-	outOfBandBuf *buffer
-	incomingBuf  *buffer
+	outOfBandBuf      *buffer
+	waitingSocketsBuf *buffer
+	m                 sync.RWMutex
 }
 
 type udpPacket struct {
@@ -70,11 +72,12 @@ type udpPacket struct {
 
 func newListenerBaseConn(conn net.PacketConn) *listenerBaseConn {
 	c := &listenerBaseConn{
-		conn:         conn,
-		recvChan:     make(chan *udpPacket),
-		closeChan:    make(chan int),
-		outOfBandBuf: NewBuffer(outOfBandBufferSize),
-		incomingBuf:  NewBuffer(incomingBufferSize),
+		conn:              conn,
+		sockets:           make(map[uint16]*listenerConn),
+		recvChan:          make(chan *udpPacket),
+		closeChan:         make(chan int),
+		outOfBandBuf:      NewBuffer(outOfBandBufferSize),
+		waitingSocketsBuf: NewBuffer(waitingSocketsBufferSize),
 	}
 	return c
 }
@@ -145,7 +148,7 @@ func (c *listenerBaseConn) listen() {
 		n, addr, err := c.conn.ReadFrom(buf[:])
 		if err != nil {
 			c.outOfBandBuf.Close()
-			c.incomingBuf.Close()
+			c.waitingSocketsBuf.Close()
 			return
 		}
 
@@ -154,23 +157,33 @@ func (c *listenerBaseConn) listen() {
 			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
 		} else {
 			p.addr = addr
-			id := p.header.id + 1
-			i := c.incomingBuf.Get(id)
-			if i != nil {
+			if p.header.typ == stSyn {
+				if c.waitingSocketsBuf.Get(p.header.id+1) == nil {
+					c.waitingSocketsBuf.Push(newListenerConn(c, p))
+				}
+			} else if i := c.waitingSocketsBuf.Get(p.header.id); i != nil {
 				i.(*listenerConn).processPacket(p)
-			} else if p.header.typ == stSyn {
-				c.incomingBuf.Push(newListenerConn(c, p))
+			} else {
+				c.m.RLock()
+				s := c.sockets[p.header.id]
+				c.m.RUnlock()
+				if s != nil {
+					s.processPacket(p)
+				}
 			}
 		}
 	}
 }
 
 func (c *listenerBaseConn) accept() (*listenerConn, error) {
-	i, err := c.incomingBuf.Pop()
+	i, err := c.waitingSocketsBuf.Pop()
 	if err != nil {
 		return nil, err
 	}
+	c.m.Lock()
+	defer c.m.Unlock()
 	conn := i.(*listenerConn)
+	c.sockets[conn.rid] = conn
 	return conn, nil
 }
 
@@ -220,6 +233,10 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 }
 
 func (c *listenerConn) processPacket(p *packet) {
+	if p.header.typ == stData {
+		c.ack = p.header.seq
+		c.sendACK()
+	}
 	fmt.Println("#", p)
 }
 
