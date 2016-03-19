@@ -233,9 +233,11 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 }
 
 func (c *listenerConn) processPacket(p *packet) {
-	if p.header.typ == stData {
+	switch p.header.typ {
+	case stData:
 		c.ack = p.header.seq
 		c.sendACK()
+	case stFin:
 	}
 	fmt.Println("#", p)
 }
