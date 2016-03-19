@@ -1,6 +1,9 @@
 package utp
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 type buffer struct {
 	pushChan   chan interface{}
@@ -11,9 +14,11 @@ type buffer struct {
 	m          sync.Mutex
 	cond       *sync.Cond
 	closed     bool
+	deadline   time.Time
+	timeout    bool
 }
 
-func newBuffer(size int) *buffer {
+func NewBuffer(size int) *buffer {
 	b := &buffer{
 		pushChan: make(chan interface{}),
 		popChan:  make(chan interface{}),
@@ -51,20 +56,43 @@ func (b *buffer) Push(i interface{}) {
 	b.pushChan <- i
 }
 
-func (b *buffer) Pop() interface{} {
+func (b *buffer) Pop() (interface{}, error) {
 	b.m.Lock()
-	for b.size == 0 && !b.closed {
+	defer b.m.Unlock()
+	b.timeout = false
+	if !b.deadline.IsZero() {
+		d := b.deadline.Sub(time.Now())
+		if d > 0 {
+			go func() {
+				time.Sleep(d)
+				b.m.Lock()
+				defer b.m.Unlock()
+				b.timeout = true
+				b.cond.Signal()
+			}()
+		} else {
+			return nil, errTimeout
+		}
+	}
+	for b.size == 0 && !b.closed && !b.timeout {
 		b.cond.Wait()
 	}
-	defer b.m.Unlock()
-	if b.size > 0 {
+	if b.timeout {
+		return nil, errTimeout
+	} else if b.size > 0 {
 		i := b.b[b.begin]
 		b.begin = (b.begin + 1) % len(b.b)
 		b.size--
-		return i
+		return i, nil
 	} else {
-		return nil
+		return nil, errClosing
 	}
+}
+
+func (b *buffer) SetDeadline(d time.Time) {
+	b.m.Lock()
+	defer b.m.Unlock()
+	b.deadline = d
 }
 
 func (b *buffer) Close() {

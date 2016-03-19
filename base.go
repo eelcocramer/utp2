@@ -29,8 +29,8 @@ func newBaseConn(conn net.PacketConn) *baseConn {
 		conn:         conn,
 		recvChan:     make(chan *udpPacket),
 		closeChan:    make(chan int),
-		outOfBandBuf: newBuffer(outOfBandBufferSize),
-		incomingBuf:  newBuffer(incomingBufferSize),
+		outOfBandBuf: NewBuffer(outOfBandBufferSize),
+		incomingBuf:  NewBuffer(incomingBufferSize),
 	}
 	return c
 }
@@ -41,11 +41,12 @@ func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	if !c.ok() {
 		return 0, nil, syscall.EINVAL
 	}
-	i := c.outOfBandBuf.Pop()
-	if p, ok := i.(*udpPacket); ok {
-		return copy(b, p.b), p.addr, nil
+	i, err := c.outOfBandBuf.Pop()
+	if err != nil {
+		return 0, nil, err
 	}
-	return 0, nil, errClosing
+	p := i.(*udpPacket)
+	return copy(b, p.b), p.addr, nil
 }
 
 func (c *baseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
@@ -115,11 +116,12 @@ func (c *baseConn) listen() {
 }
 
 func (c *baseConn) accept() (*Conn, error) {
-	i := c.incomingBuf.Pop()
-	if conn, ok := i.(*Conn); ok {
-		return conn, nil
+	i, err := c.incomingBuf.Pop()
+	if err != nil {
+		return nil, err
 	}
-	return nil, errClosing
+	conn := i.(*Conn)
+	return conn, nil
 }
 
 func (c *baseConn) decodePacket(b []byte) (*packet, error) {
