@@ -8,6 +8,12 @@ import (
 	"github.com/h2so5/utp2"
 )
 
+type te struct{}
+
+func (t *te) Index() int {
+	return 999
+}
+
 func main() {
 	numcpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(numcpu)
@@ -34,7 +40,7 @@ func main() {
 	time.Sleep(time.Second)
 	b.Push(4)
 	time.Sleep(time.Second)
-	b.Push(5)
+	b.Push(&te{})
 	time.Sleep(time.Second)
 	b.Push(6)
 	time.Sleep(time.Second)

@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+type indexed interface {
+	Index() int
+}
+
 type buffer struct {
 	pushChan   chan interface{}
 	popChan    chan interface{}
@@ -16,6 +20,7 @@ type buffer struct {
 	closed     bool
 	deadline   time.Time
 	timeout    bool
+	index      map[int]interface{}
 }
 
 func NewBuffer(size int) *buffer {
@@ -23,6 +28,7 @@ func NewBuffer(size int) *buffer {
 		pushChan: make(chan interface{}),
 		popChan:  make(chan interface{}),
 		b:        make([]interface{}, size),
+		index:    make(map[int]interface{}),
 	}
 	b.cond = sync.NewCond(&b.m)
 
@@ -38,6 +44,9 @@ func NewBuffer(size int) *buffer {
 			}
 			b.m.Lock()
 			b.b[b.end] = p
+			if i, ok := p.(indexed); ok {
+				b.index[i.Index()] = p
+			}
 			b.end = (b.end + 1) % len(b.b)
 			if b.size < len(b.b) {
 				b.size++
@@ -80,13 +89,22 @@ func (b *buffer) Pop() (interface{}, error) {
 	if b.timeout {
 		return nil, errTimeout
 	} else if b.size > 0 {
-		i := b.b[b.begin]
+		p := b.b[b.begin]
 		b.begin = (b.begin + 1) % len(b.b)
 		b.size--
-		return i, nil
+		if i, ok := p.(indexed); ok {
+			delete(b.index, i.Index())
+		}
+		return p, nil
 	} else {
 		return nil, errClosing
 	}
+}
+
+func (b *buffer) Get(index int) interface{} {
+	b.m.Lock()
+	defer b.m.Unlock()
+	return b.index[index]
 }
 
 func (b *buffer) SetDeadline(d time.Time) error {
