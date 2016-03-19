@@ -46,12 +46,13 @@ func Listen(n string, laddr *Addr) (*Listener, error) {
 
 // AcceptUTP accepts the next incoming call and returns the new
 // connection.
-func (l *Listener) AcceptUTP() (*Conn, error) {
+func (l *Listener) AcceptUTP() (net.Conn, error) {
 	return l.conn.accept()
 }
 
 type listenerBaseConn struct {
-	conn net.PacketConn
+	conn    net.PacketConn
+	sockets []*listenerConn
 
 	recvChan  chan *udpPacket
 	closeChan chan int
@@ -150,18 +151,23 @@ func (c *listenerBaseConn) listen() {
 		if err != nil {
 			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
 		} else {
-			fmt.Println(p)
-			c.incomingBuf.Push(&Conn{})
+			id := p.header.id + 1
+			i := c.incomingBuf.Get(id)
+			if i != nil {
+				i.(*listenerConn).processPacket(p)
+			} else if p.header.typ == stSyn {
+				c.incomingBuf.Push(newListenerConn(c, p))
+			}
 		}
 	}
 }
 
-func (c *listenerBaseConn) accept() (*Conn, error) {
+func (c *listenerBaseConn) accept() (*listenerConn, error) {
 	i, err := c.incomingBuf.Pop()
 	if err != nil {
 		return nil, err
 	}
-	conn := i.(*Conn)
+	conn := i.(*listenerConn)
 	return conn, nil
 }
 
@@ -175,6 +181,34 @@ func (c *listenerBaseConn) decodePacket(b []byte) (*packet, error) {
 		return nil, errors.New("unsupported utp version")
 	}
 	return &p, nil
+}
+
+type listenerConn struct {
+	bcon *listenerBaseConn
+	id   uint16
+}
+
+func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
+	return &listenerConn{
+		bcon: bcon,
+		id:   p.header.id + 1,
+	}
+}
+
+func (c *listenerConn) processPacket(p *packet) {
+	fmt.Println("#", p)
+}
+
+func (c *listenerConn) Read(b []byte) (n int, err error)   { return 0, nil }
+func (c *listenerConn) Write(b []byte) (n int, err error)  { return 0, nil }
+func (c *listenerConn) Close() error                       { return nil }
+func (c *listenerConn) LocalAddr() net.Addr                { return nil }
+func (c *listenerConn) RemoteAddr() net.Addr               { return nil }
+func (c *listenerConn) SetDeadline(t time.Time) error      { return nil }
+func (c *listenerConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *listenerConn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *listenerConn) index() uint16 {
+	return c.id
 }
 
 /*

@@ -6,7 +6,7 @@ import (
 )
 
 type indexed interface {
-	Index() int
+	index() uint16
 }
 
 type buffer struct {
@@ -20,7 +20,7 @@ type buffer struct {
 	closed     bool
 	deadline   time.Time
 	timeout    bool
-	index      map[int]interface{}
+	index      map[uint16]interface{}
 }
 
 func NewBuffer(size int) *buffer {
@@ -28,7 +28,7 @@ func NewBuffer(size int) *buffer {
 		pushChan: make(chan interface{}),
 		popChan:  make(chan interface{}),
 		b:        make([]interface{}, size),
-		index:    make(map[int]interface{}),
+		index:    make(map[uint16]interface{}),
 	}
 	b.cond = sync.NewCond(&b.m)
 
@@ -45,7 +45,7 @@ func NewBuffer(size int) *buffer {
 			b.m.Lock()
 			b.b[b.end] = p
 			if i, ok := p.(indexed); ok {
-				b.index[i.Index()] = p
+				b.index[i.index()] = p
 			}
 			b.end = (b.end + 1) % len(b.b)
 			if b.size < len(b.b) {
@@ -93,7 +93,7 @@ func (b *buffer) Pop() (interface{}, error) {
 		b.begin = (b.begin + 1) % len(b.b)
 		b.size--
 		if i, ok := p.(indexed); ok {
-			delete(b.index, i.Index())
+			delete(b.index, i.index())
 		}
 		return p, nil
 	} else {
@@ -101,7 +101,7 @@ func (b *buffer) Pop() (interface{}, error) {
 	}
 }
 
-func (b *buffer) Get(index int) interface{} {
+func (b *buffer) Get(index uint16) interface{} {
 	b.m.Lock()
 	defer b.m.Unlock()
 	return b.index[index]
