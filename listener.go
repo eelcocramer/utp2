@@ -56,7 +56,6 @@ type listenerBaseConn struct {
 	recvChan  chan *udpPacket
 	closeChan chan int
 
-	udpPackets   []udpPacket
 	outOfBandBuf *buffer
 	incomingBuf  *buffer
 }
