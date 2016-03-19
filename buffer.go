@@ -89,10 +89,14 @@ func (b *buffer) Pop() (interface{}, error) {
 	}
 }
 
-func (b *buffer) SetDeadline(d time.Time) {
+func (b *buffer) SetDeadline(d time.Time) error {
 	b.m.Lock()
 	defer b.m.Unlock()
+	if b.closed {
+		return errClosing
+	}
 	b.deadline = d
+	return nil
 }
 
 func (b *buffer) Close() {

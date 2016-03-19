@@ -12,10 +12,10 @@ func main() {
 	numcpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(numcpu)
 
-	b := utp.NewBuffer(1)
-	b.SetDeadline(time.Now().Add(500 * time.Millisecond))
+	b := utp.NewBuffer(15)
 	go func() {
 		for {
+			b.SetDeadline(time.Now().Add(500 * time.Millisecond))
 			p, err := b.Pop()
 			if err != nil {
 				fmt.Println(err)
