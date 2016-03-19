@@ -19,7 +19,7 @@ func DialUTP(n string, laddr, raddr *Addr) (*Conn, error) {
 // DialUTPTimeout acts like Dial but takes a timeout.
 // The timeout includes name resolution, if required.
 func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (*Conn, error) {
-	conn, err := getSharedBaseConn(n, laddr)
+	conn, err := getSharedlistenerBaseConn(n, laddr)
 	if err != nil {
 		return nil, err
 	}

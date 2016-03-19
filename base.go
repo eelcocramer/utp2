@@ -1,141 +1,5 @@
 package utp
 
-import (
-	"errors"
-	"fmt"
-	"net"
-	"syscall"
-	"time"
-)
-
-type baseConn struct {
-	conn net.PacketConn
-
-	recvChan  chan *udpPacket
-	closeChan chan int
-
-	udpPackets   []udpPacket
-	outOfBandBuf *buffer
-	incomingBuf  *buffer
-}
-
-type udpPacket struct {
-	addr net.Addr
-	b    []byte
-}
-
-func newBaseConn(conn net.PacketConn) *baseConn {
-	c := &baseConn{
-		conn:         conn,
-		recvChan:     make(chan *udpPacket),
-		closeChan:    make(chan int),
-		outOfBandBuf: NewBuffer(outOfBandBufferSize),
-		incomingBuf:  NewBuffer(incomingBufferSize),
-	}
-	return c
-}
-
-func (c *baseConn) ok() bool { return c != nil && c.conn != nil }
-
-func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	if !c.ok() {
-		return 0, nil, syscall.EINVAL
-	}
-	i, err := c.outOfBandBuf.Pop()
-	if err != nil {
-		return 0, nil, err
-	}
-	p := i.(*udpPacket)
-	return copy(b, p.b), p.addr, nil
-}
-
-func (c *baseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
-	if !c.ok() {
-		return 0, syscall.EINVAL
-	}
-	return c.conn.WriteTo(b, addr)
-}
-
-func (c *baseConn) Close() error {
-	if !c.ok() {
-		return syscall.EINVAL
-	}
-	select {
-	case <-c.closeChan:
-		return errClosing
-	default:
-		close(c.closeChan)
-		c.conn.Close()
-	}
-	return nil
-}
-
-func (c *baseConn) LocalAddr() net.Addr {
-	return &Addr{Addr: c.conn.LocalAddr()}
-}
-
-func (c *baseConn) SetDeadline(t time.Time) error {
-	if !c.ok() {
-		return syscall.EINVAL
-	}
-	return nil
-}
-
-func (c *baseConn) SetReadDeadline(t time.Time) error {
-	if !c.ok() {
-		return syscall.EINVAL
-	}
-	return nil
-}
-
-func (c *baseConn) SetWriteDeadline(t time.Time) error {
-	if !c.ok() {
-		return syscall.EINVAL
-	}
-	return nil
-}
-
-func (c *baseConn) listen() {
-	for {
-		var buf [maxUdpPayload]byte
-		n, addr, err := c.conn.ReadFrom(buf[:])
-		if err != nil {
-			c.outOfBandBuf.Close()
-			c.incomingBuf.Close()
-			return
-		}
-
-		p, err := c.decodePacket(buf[:n])
-		if err != nil {
-			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
-		} else {
-			fmt.Println(p)
-			c.incomingBuf.Push(&Conn{})
-		}
-	}
-}
-
-func (c *baseConn) accept() (*Conn, error) {
-	i, err := c.incomingBuf.Pop()
-	if err != nil {
-		return nil, err
-	}
-	conn := i.(*Conn)
-	return conn, nil
-}
-
-func (c *baseConn) decodePacket(b []byte) (*packet, error) {
-	var p packet
-	err := p.UnmarshalBinary(b)
-	if err != nil {
-		return nil, err
-	}
-	if p.header.ver != version {
-		return nil, errors.New("unsupported utp version")
-	}
-	return &p, nil
-}
-
 /*
 import (
 	"errors"
@@ -146,15 +10,15 @@ import (
 	"time"
 )
 
-var baseConnMap = make(map[string]*baseConn)
-var baseConnMutex sync.Mutex
+var listenerBaseConnMap = make(map[string]*listenerBaseConn)
+var listenerBaseConnMutex sync.Mutex
 
 type packetHandler struct {
 	send   chan<- *packet
 	closed chan int
 }
 
-type baseConn struct {
+type listenerBaseConn struct {
 	addr             string
 	conn             net.PacketConn
 	synPackets       *packetRingBuffer
@@ -172,7 +36,7 @@ type baseConn struct {
 	closed     int32
 }
 
-func newBaseConn(n string, addr *Addr) (*baseConn, error) {
+func newListenerBaseConn(n string, addr *Addr) (*listenerBaseConn, error) {
 	udpnet, err := utp2udp(n)
 	if err != nil {
 		return nil, err
@@ -187,7 +51,7 @@ func newBaseConn(n string, addr *Addr) (*baseConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &baseConn{
+	c := &listenerBaseConn{
 		conn:             conn,
 		synPackets:       newPacketRingBuffer(packetBufferSize),
 		udpPackets: newPacketRingBuffer(packetBufferSize),
@@ -198,38 +62,38 @@ func newBaseConn(n string, addr *Addr) (*baseConn, error) {
 	return c, nil
 }
 
-func getSharedBaseConn(n string, addr *Addr) (*baseConn, error) {
-	baseConnMutex.Lock()
-	defer baseConnMutex.Unlock()
+func getSharedlistenerBaseConn(n string, addr *Addr) (*listenerBaseConn, error) {
+	listenerBaseConnMutex.Lock()
+	defer listenerBaseConnMutex.Unlock()
 	var s string
 	if addr != nil {
 		s = addr.String()
 	} else {
 		s = ":0"
 	}
-	if c, ok := baseConnMap[s]; ok {
+	if c, ok := listenerBaseConnMap[s]; ok {
 		return c, nil
 	}
-	c, err := newBaseConn(n, addr)
+	c, err := newListenerBaseConn(n, addr)
 	if err != nil {
 		return nil, err
 	}
 	c.addr = s
-	baseConnMap[s] = c
+	listenerBaseConnMap[s] = c
 	go c.recvLoop()
 	return c, nil
 }
 
-func (c *baseConn) ok() bool { return c != nil && c.conn != nil }
+func (c *listenerBaseConn) ok() bool { return c != nil && c.conn != nil }
 
-func (c *baseConn) LocalAddr() net.Addr {
+func (c *listenerBaseConn) LocalAddr() net.Addr {
 	if !c.ok() {
 		return nil
 	}
 	return &Addr{Addr: c.conn.LocalAddr()}
 }
 
-func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
+func (c *listenerBaseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	if !c.ok() {
 		return 0, nil, syscall.EINVAL
 	}
@@ -260,7 +124,7 @@ func (c *baseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	return copy(b, p.payload), p.addr, nil
 }
 
-func (c *baseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
+func (c *listenerBaseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
 	if !c.ok() {
 		return 0, syscall.EINVAL
 	}
@@ -275,7 +139,7 @@ func (c *baseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
 	return c.conn.WriteTo(b, addr)
 }
 
-func (c *baseConn) Close() error {
+func (c *listenerBaseConn) Close() error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
@@ -292,7 +156,7 @@ func (c *baseConn) Close() error {
 	return nil
 }
 
-func (c *baseConn) SetDeadline(t time.Time) error {
+func (c *listenerBaseConn) SetDeadline(t time.Time) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
@@ -303,7 +167,7 @@ func (c *baseConn) SetDeadline(t time.Time) error {
 	return c.SetWriteDeadline(t)
 }
 
-func (c *baseConn) SetReadDeadline(t time.Time) error {
+func (c *listenerBaseConn) SetReadDeadline(t time.Time) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
@@ -311,7 +175,7 @@ func (c *baseConn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-func (c *baseConn) SetWriteDeadline(t time.Time) error {
+func (c *listenerBaseConn) SetWriteDeadline(t time.Time) error {
 	if !c.ok() {
 		return syscall.EINVAL
 	}
@@ -319,21 +183,21 @@ func (c *baseConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-func (c *baseConn) recvLoop() {
+func (c *listenerBaseConn) recvLoop() {
 	var buf [maxUdpPayload]byte
 	for {
 		l, addr, err := c.conn.ReadFrom(buf[:])
 		if err != nil {
-			ulog.Printf(3, "baseConn(%v): %v", c.LocalAddr(), err)
+			ulog.Printf(3, "listenerBaseConn(%v): %v", c.LocalAddr(), err)
 			return
 		}
 		p, err := c.decodePacket(buf[:l])
 		if err != nil {
-			ulog.Printf(3, "baseConn(%v): RECV out-of-band packet (len: %d) from %v", c.LocalAddr(), l, addr)
+			ulog.Printf(3, "listenerBaseConn(%v): RECV out-of-band packet (len: %d) from %v", c.LocalAddr(), l, addr)
 			c.udpPackets.push(&packet{payload: append([]byte{}, buf[:l]...), addr: addr})
 		} else {
 			p.addr = addr
-			ulog.Printf(3, "baseConn(%v): RECV: %v from %v", c.LocalAddr(), p, addr)
+			ulog.Printf(3, "listenerBaseConn(%v): RECV: %v from %v", c.LocalAddr(), p, addr)
 			if p.header.typ == stSyn {
 				// ignore duplicated syns
 				if !c.exists(p.header.id + 1) {
@@ -346,7 +210,7 @@ func (c *baseConn) recvLoop() {
 	}
 }
 
-func (c *baseConn) decodePacket(b []byte) (*packet, error) {
+func (c *listenerBaseConn) decodePacket(b []byte) (*packet, error) {
 	var p packet
 	err := p.UnmarshalBinary(b)
 	if err != nil {
@@ -358,13 +222,13 @@ func (c *baseConn) decodePacket(b []byte) (*packet, error) {
 	return &p, nil
 }
 
-func (c *baseConn) exists(id uint16) bool {
+func (c *listenerBaseConn) exists(id uint16) bool {
 	c.handlerMutex.RLock()
 	defer c.handlerMutex.RUnlock()
 	return c.handlers[id] != nil
 }
 
-func (c *baseConn) processPacket(p *packet) {
+func (c *listenerBaseConn) processPacket(p *packet) {
 	c.handlerMutex.RLock()
 	h, ok := c.handlers[p.header.id]
 	c.handlerMutex.RUnlock()
@@ -376,7 +240,7 @@ func (c *baseConn) processPacket(p *packet) {
 	}
 }
 
-func (c *baseConn) Register(id int32, f chan<- *packet) {
+func (c *listenerBaseConn) Register(id int32, f chan<- *packet) {
 	if id < 0 {
 		c.refMutex.Lock()
 		c.ref++
@@ -398,12 +262,12 @@ func (c *baseConn) Register(id int32, f chan<- *packet) {
 				closed: make(chan int),
 			}
 			c.handlerMutex.Unlock()
-			ulog.Printf(2, "baseConn(%v): register #%d (ref: %d)", c.LocalAddr(), id, c.ref)
+			ulog.Printf(2, "listenerBaseConn(%v): register #%d (ref: %d)", c.LocalAddr(), id, c.ref)
 		}
 	}
 }
 
-func (c *baseConn) Unregister(id int32) {
+func (c *listenerBaseConn) Unregister(id int32) {
 	if id < 0 {
 		c.refMutex.Lock()
 		c.ref--
@@ -426,30 +290,30 @@ func (c *baseConn) Unregister(id int32) {
 	r := c.ref
 	c.refMutex.Unlock()
 	if r <= 0 {
-		baseConnMutex.Lock()
-		defer baseConnMutex.Unlock()
+		listenerBaseConnMutex.Lock()
+		defer listenerBaseConnMutex.Unlock()
 		c.close()
-		delete(baseConnMap, c.addr)
-		ulog.Printf(2, "baseConn(%v): unregister #%d (ref: %d)", c.LocalAddr(), id, c.ref)
+		delete(listenerBaseConnMap, c.addr)
+		ulog.Printf(2, "listenerBaseConn(%v): unregister #%d (ref: %d)", c.LocalAddr(), id, c.ref)
 	}
 }
 
-func (c *baseConn) close() {
+func (c *listenerBaseConn) close() {
 	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		c.conn.Close()
 	}
 }
 
-func (c *baseConn) isOpen() bool {
+func (c *listenerBaseConn) isOpen() bool {
 	return atomic.LoadInt32(&c.closed) == 0
 }
 
-func (c *baseConn) Send(p *packet) {
+func (c *listenerBaseConn) Send(p *packet) {
 	b, err := p.MarshalBinary()
 	if err != nil {
 		panic(err)
 	}
-	ulog.Printf(3, "baseConn(%v): SEND: %v to %v", c.LocalAddr(), p, p.addr)
+	ulog.Printf(3, "listenerBaseConn(%v): SEND: %v to %v", c.LocalAddr(), p, p.addr)
 	_, err = c.conn.WriteTo(b, p.addr)
 	if err != nil {
 		ulog.Printf(3, "%v", err)
@@ -457,7 +321,7 @@ func (c *baseConn) Send(p *packet) {
 	}
 }
 
-func (c *baseConn) RecvSyn(timeout time.Duration) (*packet, error) {
+func (c *listenerBaseConn) RecvSyn(timeout time.Duration) (*packet, error) {
 	return c.synPackets.popOne(timeout)
 }
 */

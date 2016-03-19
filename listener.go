@@ -1,6 +1,12 @@
 package utp
 
-import "net"
+import (
+	"errors"
+	"fmt"
+	"net"
+	"syscall"
+	"time"
+)
 
 // Listener is a UTP network listener.  Clients should typically
 // use variables of type Listener instead of assuming UTP.
@@ -9,7 +15,7 @@ type Listener struct {
 	// This allows a single socket to handle multiple protocols.
 	RawConn net.PacketConn
 
-	conn *baseConn
+	conn *listenerBaseConn
 }
 
 // Listen announces on the UTP address laddr and returns a UTP
@@ -29,7 +35,7 @@ func Listen(n string, laddr *Addr) (*Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := newBaseConn(conn)
+	b := newListenerBaseConn(conn)
 	l := &Listener{
 		RawConn: b,
 		conn:    b,
@@ -42,6 +48,134 @@ func Listen(n string, laddr *Addr) (*Listener, error) {
 // connection.
 func (l *Listener) AcceptUTP() (*Conn, error) {
 	return l.conn.accept()
+}
+
+type listenerBaseConn struct {
+	conn net.PacketConn
+
+	recvChan  chan *udpPacket
+	closeChan chan int
+
+	udpPackets   []udpPacket
+	outOfBandBuf *buffer
+	incomingBuf  *buffer
+}
+
+type udpPacket struct {
+	addr net.Addr
+	b    []byte
+}
+
+func newListenerBaseConn(conn net.PacketConn) *listenerBaseConn {
+	c := &listenerBaseConn{
+		conn:         conn,
+		recvChan:     make(chan *udpPacket),
+		closeChan:    make(chan int),
+		outOfBandBuf: NewBuffer(outOfBandBufferSize),
+		incomingBuf:  NewBuffer(incomingBufferSize),
+	}
+	return c
+}
+
+func (c *listenerBaseConn) ok() bool { return c != nil && c.conn != nil }
+
+func (c *listenerBaseConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
+	if !c.ok() {
+		return 0, nil, syscall.EINVAL
+	}
+	i, err := c.outOfBandBuf.Pop()
+	if err != nil {
+		return 0, nil, err
+	}
+	p := i.(*udpPacket)
+	return copy(b, p.b), p.addr, nil
+}
+
+func (c *listenerBaseConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
+	if !c.ok() {
+		return 0, syscall.EINVAL
+	}
+	return c.conn.WriteTo(b, addr)
+}
+
+func (c *listenerBaseConn) Close() error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	select {
+	case <-c.closeChan:
+		return errClosing
+	default:
+		close(c.closeChan)
+		c.conn.Close()
+	}
+	return nil
+}
+
+func (c *listenerBaseConn) LocalAddr() net.Addr {
+	return &Addr{Addr: c.conn.LocalAddr()}
+}
+
+func (c *listenerBaseConn) SetDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	return nil
+}
+
+func (c *listenerBaseConn) SetReadDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	return nil
+}
+
+func (c *listenerBaseConn) SetWriteDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	return nil
+}
+
+func (c *listenerBaseConn) listen() {
+	for {
+		var buf [maxUdpPayload]byte
+		n, addr, err := c.conn.ReadFrom(buf[:])
+		if err != nil {
+			c.outOfBandBuf.Close()
+			c.incomingBuf.Close()
+			return
+		}
+
+		p, err := c.decodePacket(buf[:n])
+		if err != nil {
+			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
+		} else {
+			fmt.Println(p)
+			c.incomingBuf.Push(&Conn{})
+		}
+	}
+}
+
+func (c *listenerBaseConn) accept() (*Conn, error) {
+	i, err := c.incomingBuf.Pop()
+	if err != nil {
+		return nil, err
+	}
+	conn := i.(*Conn)
+	return conn, nil
+}
+
+func (c *listenerBaseConn) decodePacket(b []byte) (*packet, error) {
+	var p packet
+	err := p.UnmarshalBinary(b)
+	if err != nil {
+		return nil, err
+	}
+	if p.header.ver != version {
+		return nil, errors.New("unsupported utp version")
+	}
+	return &p, nil
 }
 
 /*
@@ -62,7 +196,7 @@ type Listener struct {
 	// This allows a single socket to handle multiple protocols.
 	RawConn net.PacketConn
 
-	conn          *baseConn
+	conn          *listenerBaseConn
 	deadline      time.Time
 	deadlineMutex sync.RWMutex
 	closed        int32
@@ -75,7 +209,7 @@ func (l *Listener) ok() bool { return l != nil && l.conn != nil }
 // port of 0, ListenUTP will choose an available port.  The caller can
 // use the Addr method of Listener to retrieve the chosen address.
 func Listen(n string, laddr *Addr) (*Listener, error) {
-	conn, err := newBaseConn(n, laddr)
+	conn, err := newListenerBaseConn(n, laddr)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +271,7 @@ func (l *Listener) AcceptUTP() (*Conn, error) {
 	go c.loop()
 	c.recv <- p
 
-	ulog.Printf(2, "baseConn(%v): accept #%d from %v", c.LocalAddr(), c.rid, c.raddr)
+	ulog.Printf(2, "listenerBaseConn(%v): accept #%d from %v", c.LocalAddr(), c.rid, c.raddr)
 	return c, nil
 }
 

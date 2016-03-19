@@ -18,7 +18,7 @@ import (
 // Conn is an implementation of the Conn interface for UTP network
 // connections.
 type Conn struct {
-	conn                        *baseConn
+	conn                        *listenerBaseConn
 	raddr                       net.Addr
 	rid, sid, seq, ack, lastAck uint16
 	rtt, rttVar, minRtt, rto    int64
