@@ -24,6 +24,7 @@ func main() {
 		fmt.Println(listener.RawConn.LocalAddr(), err)
 
 		listener.AcceptUTP()
+		listener.AcceptUTP()
 
 	}
 }

@@ -3,6 +3,8 @@ package utp
 import (
 	"errors"
 	"fmt"
+	"math"
+	"math/rand"
 	"net"
 	"syscall"
 	"time"
@@ -151,6 +153,7 @@ func (c *listenerBaseConn) listen() {
 		if err != nil {
 			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
 		} else {
+			p.addr = addr
 			id := p.header.id + 1
 			i := c.incomingBuf.Get(id)
 			if i != nil {
@@ -171,6 +174,18 @@ func (c *listenerBaseConn) accept() (*listenerConn, error) {
 	return conn, nil
 }
 
+func (c *listenerBaseConn) send(p *packet) error {
+	b, err := p.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = c.conn.WriteTo(b, p.addr)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (c *listenerBaseConn) decodePacket(b []byte) (*packet, error) {
 	var p packet
 	err := p.UnmarshalBinary(b)
@@ -184,19 +199,34 @@ func (c *listenerBaseConn) decodePacket(b []byte) (*packet, error) {
 }
 
 type listenerConn struct {
-	bcon *listenerBaseConn
-	id   uint16
+	bcon               *listenerBaseConn
+	raddr              net.Addr
+	rid, sid, seq, ack uint16
+	diff               uint32
 }
 
 func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
-	return &listenerConn{
-		bcon: bcon,
-		id:   p.header.id + 1,
+	seq := rand.Intn(math.MaxUint16)
+	c := &listenerConn{
+		bcon:  bcon,
+		raddr: p.addr,
+		rid:   p.header.id + 1,
+		sid:   p.header.id,
+		seq:   uint16(seq),
+		ack:   p.header.seq,
 	}
+	c.sendACK()
+	return c
 }
 
 func (c *listenerConn) processPacket(p *packet) {
 	fmt.Println("#", p)
+}
+
+func (c *listenerConn) sendACK() {
+	ack := c.makePacket(stState, nil, c.raddr)
+	fmt.Println(ack)
+	fmt.Println(c.bcon.send(ack))
 }
 
 func (c *listenerConn) Read(b []byte) (n int, err error)   { return 0, nil }
@@ -208,7 +238,34 @@ func (c *listenerConn) SetDeadline(t time.Time) error      { return nil }
 func (c *listenerConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *listenerConn) SetWriteDeadline(t time.Time) error { return nil }
 func (c *listenerConn) index() uint16 {
-	return c.id
+	return c.rid
+}
+
+func (c *listenerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet {
+	wnd := windowSize * mtu
+	id := c.sid
+	if typ == stSyn {
+		id = c.rid
+	}
+	p := &packet{}
+	p.header.typ = typ
+	p.header.ver = version
+	p.header.id = id
+	p.header.t = currentMicrosecond()
+	p.header.diff = c.diff
+	p.header.wnd = uint32(wnd)
+	p.header.seq = c.seq
+	p.header.ack = c.ack
+	p.addr = dst
+	if typ != stState && typ != stFin {
+		c.seq++
+	}
+	p.payload = payload
+	return p
+}
+
+func currentMicrosecond() uint32 {
+	return uint32(time.Now().Nanosecond() / 1000)
 }
 
 /*
