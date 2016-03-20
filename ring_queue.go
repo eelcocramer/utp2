@@ -28,6 +28,9 @@ func NewRingQueue(size int) *ringQueue {
 		pushChan: make(chan interface{}),
 		popChan:  make(chan interface{}),
 		b:        make([]interface{}, size),
+		size:     0,
+		begin:    0,
+		end:      0,
 		index:    make(map[uint16]interface{}),
 	}
 	b.cond = sync.NewCond(&b.m)
