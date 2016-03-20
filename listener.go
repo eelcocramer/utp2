@@ -249,8 +249,18 @@ func (c *listenerConn) processPacket(p *packet) {
 
 func (c *listenerConn) sendACK() {
 	ack := c.makePacket(stState, nil, c.raddr)
-	fmt.Println(ack)
-	fmt.Println(c.bcon.send(ack))
+	c.bcon.send(ack)
+}
+
+func (c *listenerConn) sendDATA(b []byte) {
+	for i := 0; i <= len(b)/mss; i++ {
+		l := len(b) - i*mss
+		if l > mss {
+			l = mss
+		}
+		data := c.makePacket(stData, b[i*mss:i*mss+l], c.raddr)
+		c.bcon.send(data)
+	}
 }
 
 func (c *listenerConn) Read(b []byte) (n int, err error) {
@@ -268,7 +278,12 @@ func (c *listenerConn) Read(b []byte) (n int, err error) {
 	c.recvRest = p[l:]
 	return l, nil
 }
-func (c *listenerConn) Write(b []byte) (n int, err error)  { return 0, nil }
+
+func (c *listenerConn) Write(b []byte) (n int, err error) {
+	c.sendDATA(b)
+	return len(b), nil
+}
+
 func (c *listenerConn) Close() error                       { return nil }
 func (c *listenerConn) LocalAddr() net.Addr                { return c.bcon.conn.LocalAddr() }
 func (c *listenerConn) RemoteAddr() net.Addr               { return c.raddr }

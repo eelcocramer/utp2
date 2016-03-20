@@ -7,12 +7,6 @@ import (
 	"github.com/h2so5/utp2"
 )
 
-type te struct{}
-
-func (t *te) index() int {
-	return 999
-}
-
 func main() {
 	numcpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(numcpu)
@@ -23,8 +17,9 @@ func main() {
 
 	c, _ := listener.AcceptUTP()
 	var buf [256]byte
-	l, _ := c.Read(buf[:])
-	fmt.Println(buf[:l])
 	for {
+		l, _ := c.Read(buf[:])
+		c.Write(buf[:l])
+		fmt.Println(buf[:l])
 	}
 }
