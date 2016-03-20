@@ -60,8 +60,8 @@ type listenerBaseConn struct {
 	recvChan  chan *udpPacket
 	closeChan chan int
 
-	outOfBandBuf      *buffer
-	waitingSocketsBuf *buffer
+	outOfBandBuf      *ringQueue
+	waitingSocketsBuf *ringQueue
 	m                 sync.RWMutex
 }
 
@@ -76,8 +76,8 @@ func newListenerBaseConn(conn net.PacketConn) *listenerBaseConn {
 		sockets:           make(map[uint16]*listenerConn),
 		recvChan:          make(chan *udpPacket),
 		closeChan:         make(chan int),
-		outOfBandBuf:      NewBuffer(outOfBandBufferSize),
-		waitingSocketsBuf: NewBuffer(waitingSocketsBufferSize),
+		outOfBandBuf:      NewRingQueue(outOfBandBufferSize),
+		waitingSocketsBuf: NewRingQueue(waitingSocketsBufferSize),
 	}
 	return c
 }
@@ -217,7 +217,7 @@ type listenerConn struct {
 	rid, sid, seq, ack uint16
 	diff               uint32
 
-	recvBuf  *buffer
+	recvBuf  *ringQueue
 	recvRest []byte
 }
 
@@ -230,7 +230,7 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 		sid:     p.header.id,
 		seq:     uint16(seq),
 		ack:     p.header.seq,
-		recvBuf: NewBuffer(128),
+		recvBuf: NewRingQueue(128),
 	}
 	c.sendACK()
 	return c

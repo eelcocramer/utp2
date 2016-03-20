@@ -9,7 +9,7 @@ type indexed interface {
 	index() uint16
 }
 
-type buffer struct {
+type ringQueue struct {
 	pushChan   chan interface{}
 	popChan    chan interface{}
 	b          []interface{}
@@ -23,8 +23,8 @@ type buffer struct {
 	index      map[uint16]interface{}
 }
 
-func NewBuffer(size int) *buffer {
-	b := &buffer{
+func NewRingQueue(size int) *ringQueue {
+	b := &ringQueue{
 		pushChan: make(chan interface{}),
 		popChan:  make(chan interface{}),
 		b:        make([]interface{}, size),
@@ -61,11 +61,11 @@ func NewBuffer(size int) *buffer {
 	return b
 }
 
-func (b *buffer) Push(i interface{}) {
+func (b *ringQueue) Push(i interface{}) {
 	b.pushChan <- i
 }
 
-func (b *buffer) Pop() (interface{}, error) {
+func (b *ringQueue) Pop() (interface{}, error) {
 	b.m.Lock()
 	defer b.m.Unlock()
 	b.timeout = false
@@ -101,13 +101,13 @@ func (b *buffer) Pop() (interface{}, error) {
 	}
 }
 
-func (b *buffer) Get(index uint16) interface{} {
+func (b *ringQueue) Get(index uint16) interface{} {
 	b.m.Lock()
 	defer b.m.Unlock()
 	return b.index[index]
 }
 
-func (b *buffer) SetDeadline(d time.Time) error {
+func (b *ringQueue) SetDeadline(d time.Time) error {
 	b.m.Lock()
 	defer b.m.Unlock()
 	if b.closed {
@@ -117,6 +117,6 @@ func (b *buffer) SetDeadline(d time.Time) error {
 	return nil
 }
 
-func (b *buffer) Close() {
+func (b *ringQueue) Close() {
 	close(b.pushChan)
 }

@@ -502,7 +502,7 @@ func (c *Conn) sendSYN() {
 	syn := c.makePacket(stSyn, nil, c.raddr)
 	err := c.sendbuf.push(syn)
 	if err != nil {
-		ulog.Printf(2, "Conn(%v): buffer error: %v", c.LocalAddr(), err)
+		ulog.Printf(2, "Conn(%v): ringQueue error: %v", c.LocalAddr(), err)
 		return
 	}
 	c.stat.sentPackets++
@@ -513,7 +513,7 @@ func (c *Conn) sendFIN() error {
 	fin := c.makePacket(stFin, nil, c.raddr)
 	err := c.sendbuf.push(fin)
 	if err != nil {
-		ulog.Printf(2, "Conn(%v): buffer error: %v", c.LocalAddr(), err)
+		ulog.Printf(2, "Conn(%v): ringQueue error: %v", c.LocalAddr(), err)
 		return err
 	}
 	c.stat.sentPackets++
