@@ -237,6 +237,15 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 }
 
 func (c *listenerConn) processPacket(p *packet) {
+	if p.header.t == 0 {
+		c.diff = 0
+	} else {
+		t := currentMicrosecond()
+		if t > p.header.t {
+			c.diff = t - p.header.t
+		}
+	}
+
 	switch p.header.typ {
 	case stData:
 		c.ack = p.header.seq
