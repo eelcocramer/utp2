@@ -216,17 +216,21 @@ type listenerConn struct {
 	raddr              net.Addr
 	rid, sid, seq, ack uint16
 	diff               uint32
+
+	recvBuf  *buffer
+	recvRest []byte
 }
 
 func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 	seq := rand.Intn(math.MaxUint16)
 	c := &listenerConn{
-		bcon:  bcon,
-		raddr: p.addr,
-		rid:   p.header.id + 1,
-		sid:   p.header.id,
-		seq:   uint16(seq),
-		ack:   p.header.seq,
+		bcon:    bcon,
+		raddr:   p.addr,
+		rid:     p.header.id + 1,
+		sid:     p.header.id,
+		seq:     uint16(seq),
+		ack:     p.header.seq,
+		recvBuf: NewBuffer(128),
 	}
 	c.sendACK()
 	return c
@@ -237,6 +241,7 @@ func (c *listenerConn) processPacket(p *packet) {
 	case stData:
 		c.ack = p.header.seq
 		c.sendACK()
+		c.recvBuf.Push(p.payload)
 	case stFin:
 	}
 	fmt.Println("#", p)
@@ -248,11 +253,25 @@ func (c *listenerConn) sendACK() {
 	fmt.Println(c.bcon.send(ack))
 }
 
-func (c *listenerConn) Read(b []byte) (n int, err error)   { return 0, nil }
+func (c *listenerConn) Read(b []byte) (n int, err error) {
+	if len(c.recvRest) > 0 {
+		l := copy(b, c.recvRest)
+		c.recvRest = c.recvRest[l:]
+		return l, nil
+	}
+	i, err := c.recvBuf.Pop()
+	if err != nil {
+		return 0, err
+	}
+	p := i.([]byte)
+	l := copy(b, p)
+	c.recvRest = p[l:]
+	return l, nil
+}
 func (c *listenerConn) Write(b []byte) (n int, err error)  { return 0, nil }
 func (c *listenerConn) Close() error                       { return nil }
-func (c *listenerConn) LocalAddr() net.Addr                { return nil }
-func (c *listenerConn) RemoteAddr() net.Addr               { return nil }
+func (c *listenerConn) LocalAddr() net.Addr                { return c.bcon.conn.LocalAddr() }
+func (c *listenerConn) RemoteAddr() net.Addr               { return c.raddr }
 func (c *listenerConn) SetDeadline(t time.Time) error      { return nil }
 func (c *listenerConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *listenerConn) SetWriteDeadline(t time.Time) error { return nil }
