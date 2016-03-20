@@ -24,24 +24,16 @@ func NewRingBuffer(n, seq uint16) *ringBuffer {
 	return r
 }
 
-func (r *ringBuffer) Pop() ([][]byte, error) {
+func (r *ringBuffer) Pop() ([]byte, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
 	fmt.Println("readable", r.readable(), r.begin, r.seq)
 	for r.readable() == 0 {
 		r.cond.Wait()
 	}
-	b := make([][]byte, 0, 1)
-	for i := 0; i < len(r.b); i++ {
-		c := r.b[r.begin]
-		if c != nil {
-			b = append(b, c)
-		} else {
-			break
-		}
-		r.begin = (r.begin + 1) % len(r.b)
-		r.seq = uint16((int(r.seq) + 1) % 65536)
-	}
+  b := r.b[r.begin]
+  r.begin = (r.begin + 1) % len(r.b)
+  r.seq = uint16((int(r.seq) + 1) % 65536)
 	r.cond.Signal()
 	return b, nil
 }

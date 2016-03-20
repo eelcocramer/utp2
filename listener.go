@@ -217,7 +217,7 @@ type listenerConn struct {
 	rid, sid, seq, ack uint16
 	diff               uint32
 
-	recvBuf  *ringQueue
+	recvBuf  *ringBuffer
 	recvRest []byte
 }
 
@@ -230,7 +230,7 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 		sid:     p.header.id,
 		seq:     uint16(seq),
 		ack:     p.header.seq,
-		recvBuf: NewRingQueue(128),
+		recvBuf: NewRingBuffer(128, p.header.seq+1),
 	}
 	c.sendACK()
 	return c
@@ -250,7 +250,7 @@ func (c *listenerConn) processPacket(p *packet) {
 	case stData:
 		c.ack = p.header.seq
 		c.sendACK()
-		c.recvBuf.Push(p.payload)
+		c.recvBuf.Put(p.payload, p.header.seq)
 	case stFin:
 	}
 	fmt.Println("#", p)
@@ -277,11 +277,10 @@ func (c *listenerConn) Read(b []byte) (n int, err error) {
 		c.recvRest = c.recvRest[l:]
 		return l, nil
 	}
-	i, err := c.recvBuf.Pop()
+	p, err := c.recvBuf.Pop()
 	if err != nil {
 		return 0, err
 	}
-	p := i.([]byte)
 	l := copy(b, p)
 	c.recvRest = p[l:]
 	return l, nil
