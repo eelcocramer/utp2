@@ -2,7 +2,6 @@ package utp
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 )
 
@@ -27,15 +26,43 @@ func NewRingBuffer(n, seq uint16) *ringBuffer {
 func (r *ringBuffer) Pop() ([]byte, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
-	fmt.Println("readable", r.readable(), r.begin, r.seq)
 	for r.readable() == 0 {
 		r.cond.Wait()
 	}
-  b := r.b[r.begin]
-  r.begin = (r.begin + 1) % len(r.b)
-  r.seq = uint16((int(r.seq) + 1) % 65536)
+	b := r.b[r.begin]
+	r.b[r.begin] = nil
+	r.begin = (r.begin + 1) % len(r.b)
+	r.seq = uint16((int(r.seq) + 1) % 65536)
 	r.cond.Signal()
 	return b, nil
+}
+
+func (r *ringBuffer) Erase(seq uint16) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	for r.seq != seq {
+		r.b[r.begin] = nil
+		r.begin = (r.begin + 1) % len(r.b)
+		r.seq = uint16((int(r.seq) + 1) % 65536)
+	}
+	r.b[r.begin] = nil
+	r.begin = (r.begin + 1) % len(r.b)
+	r.seq = uint16((int(r.seq) + 1) % 65536)
+	r.cond.Signal()
+}
+
+func (r *ringBuffer) Push(b []byte) (uint16, error) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	w := r.writable()
+	for ; w == 0; w = r.writable() {
+		r.cond.Wait()
+	}
+	seq := uint16((int(r.seq) + len(r.b) - w) % 65536)
+	i := r.getIndex(seq)
+	r.b[i] = b
+	r.cond.Signal()
+	return seq, nil
 }
 
 func (r *ringBuffer) Put(b []byte, seq uint16) error {
