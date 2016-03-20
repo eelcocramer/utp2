@@ -261,15 +261,14 @@ func (c *listenerConn) sendACK() {
 	c.bcon.send(ack)
 }
 
-func (c *listenerConn) sendDATA(b []byte) {
-	for i := 0; i <= len(b)/mss; i++ {
-		l := len(b) - i*mss
-		if l > mss {
-			l = mss
-		}
-		data := c.makePacket(stData, b[i*mss:i*mss+l], c.raddr)
-		c.bcon.send(data)
+func (c *listenerConn) sendDATA(b []byte) (int, error) {
+	payload := b
+	if len(payload) > mss {
+		payload = payload[:mss]
 	}
+	data := c.makePacket(stData, payload, c.raddr)
+	c.bcon.send(data)
+	return len(payload), nil
 }
 
 func (c *listenerConn) Read(b []byte) (n int, err error) {
@@ -289,8 +288,7 @@ func (c *listenerConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *listenerConn) Write(b []byte) (n int, err error) {
-	c.sendDATA(b)
-	return len(b), nil
+	return c.sendDATA(b)
 }
 
 func (c *listenerConn) Close() error                       { return nil }
