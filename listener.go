@@ -231,8 +231,8 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 		sid:     p.header.id,
 		seq:     uint16(seq),
 		ack:     p.header.seq,
-		recvBuf: NewRingBuffer(128, p.header.seq+1),
-		sendBuf: NewRingBuffer(128, uint16(seq)),
+		recvBuf: NewRingBuffer(windowSize, p.header.seq+1),
+		sendBuf: NewRingBuffer(windowSize, uint16(seq)),
 	}
 
 	c.sendACK()
@@ -314,7 +314,7 @@ func (c *listenerConn) index() uint16 {
 }
 
 func (c *listenerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet {
-	wnd := windowSize * mtu
+	wnd := c.recvBuf.Window() * mtu
 	id := c.sid
 	if typ == stSyn {
 		id = c.rid

@@ -26,7 +26,7 @@ const (
 	headerSize       = 20
 	mtu              = 3200
 	mss              = mtu - headerSize
-	windowSize       = 100
+	windowSize       = 128
 	packetBufferSize = 256
 	readBufferSize   = 1048576
 	maxRetry         = 3

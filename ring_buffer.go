@@ -83,6 +83,12 @@ func (r *ringBuffer) Ack() uint16 {
 	return uint16((int(r.seq) + r.readable() + 65535) % 65536)
 }
 
+func (r *ringBuffer) Window() int {
+  r.m.RLock()
+  defer r.m.RUnlock()
+  return r.writable()
+}
+
 func (r *ringBuffer) getIndex(seq uint16) int {
 	i := int(seq) - int(r.seq)
 	if i < 0 {
