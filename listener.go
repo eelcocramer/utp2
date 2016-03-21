@@ -43,7 +43,6 @@ func Listen(n string, laddr *Addr) (*Listener, error) {
 		RawConn: b,
 		conn:    b,
 	}
-	go b.listen()
 	return l, nil
 }
 
@@ -79,6 +78,7 @@ func newListenerBaseConn(conn net.PacketConn) *listenerBaseConn {
 		outOfBandBuf:      NewRingQueue(outOfBandBufferSize),
 		waitingSocketsBuf: NewRingQueue(waitingSocketsBufferSize),
 	}
+	go c.listen()
 	return c
 }
 
