@@ -219,6 +219,7 @@ type listenerConn struct {
 
 	recvBuf  *ringBuffer
 	recvRest []byte
+	sendBuf  *ringBuffer
 }
 
 func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
@@ -231,7 +232,9 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
 		seq:     uint16(seq),
 		ack:     p.header.seq,
 		recvBuf: NewRingBuffer(128, p.header.seq+1),
+		sendBuf: NewRingBuffer(128, uint16(seq)),
 	}
+
 	c.sendACK()
 	return c
 }
@@ -251,6 +254,8 @@ func (c *listenerConn) processPacket(p *packet) {
 		c.ack = p.header.seq
 		c.sendACK()
 		c.recvBuf.Put(p.payload, p.header.seq)
+	case stState:
+		c.sendBuf.Erase(p.header.ack)
 	case stFin:
 	}
 	fmt.Println("#", p)
@@ -262,13 +267,9 @@ func (c *listenerConn) sendACK() {
 }
 
 func (c *listenerConn) sendDATA(b []byte) (int, error) {
-	payload := b
-	if len(payload) > mss {
-		payload = payload[:mss]
-	}
-	data := c.makePacket(stData, payload, c.raddr)
+	data := c.makePacket(stData, b, c.raddr)
 	c.bcon.send(data)
-	return len(payload), nil
+	return len(b), nil
 }
 
 func (c *listenerConn) Read(b []byte) (n int, err error) {
@@ -287,7 +288,19 @@ func (c *listenerConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *listenerConn) Write(b []byte) (n int, err error) {
-	return c.sendDATA(b)
+	payload := b
+	if len(payload) > mss {
+		payload = payload[:mss]
+	}
+	_, err = c.sendBuf.Push(payload)
+	if err != nil {
+		return 0, err
+	}
+	l, err := c.sendDATA(payload)
+	if err != nil {
+		return 0, err
+	}
+	return l, nil
 }
 
 func (c *listenerConn) Close() error                       { return nil }
