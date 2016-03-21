@@ -251,9 +251,9 @@ func (c *listenerConn) processPacket(p *packet) {
 
 	switch p.header.typ {
 	case stData:
-		c.ack = p.header.seq
-		c.sendACK()
 		c.recvBuf.Put(p.payload, p.header.seq)
+		c.ack = c.recvBuf.Ack()
+		c.sendACK()
 	case stState:
 		c.sendBuf.Erase(p.header.ack)
 	case stFin:
@@ -272,7 +272,7 @@ func (c *listenerConn) sendDATA(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (c *listenerConn) Read(b []byte) (n int, err error) {
+func (c *listenerConn) Read(b []byte) (int, error) {
 	if len(c.recvRest) > 0 {
 		l := copy(b, c.recvRest)
 		c.recvRest = c.recvRest[l:]
@@ -287,12 +287,12 @@ func (c *listenerConn) Read(b []byte) (n int, err error) {
 	return l, nil
 }
 
-func (c *listenerConn) Write(b []byte) (n int, err error) {
+func (c *listenerConn) Write(b []byte) (int, error) {
 	payload := b
 	if len(payload) > mss {
 		payload = payload[:mss]
 	}
-	_, err = c.sendBuf.Push(payload)
+	_, err := c.sendBuf.Push(payload)
 	if err != nil {
 		return 0, err
 	}

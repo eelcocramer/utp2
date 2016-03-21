@@ -77,6 +77,12 @@ func (r *ringBuffer) Put(b []byte, seq uint16) error {
 	return nil
 }
 
+func (r *ringBuffer) Ack() uint16 {
+	r.m.RLock()
+	defer r.m.RUnlock()
+	return uint16((int(r.seq) + r.readable() + 65535) % 65536)
+}
+
 func (r *ringBuffer) getIndex(seq uint16) int {
 	i := int(seq) - int(r.seq)
 	if i < 0 {
