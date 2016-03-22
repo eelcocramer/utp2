@@ -2,8 +2,8 @@ package utp
 
 import (
 	"errors"
-	"fmt"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -30,7 +30,7 @@ type Dialer struct {
 // Dial connects to the address on the named network.
 //
 // See func Dial for a description of the network and address parameters.
-func (d *Dialer) Dial(n, addr string) (*Conn, error) {
+func (d *Dialer) Dial(n, addr string) (net.Conn, error) {
 	raddr, err := ResolveAddr(n, addr)
 	if err != nil {
 		return nil, err
@@ -45,8 +45,78 @@ func (d *Dialer) Dial(n, addr string) (*Conn, error) {
 		}
 	}
 
-	fmt.Println(raddr, laddr)
-	return nil, nil
+	return DialUTPTimeout(n, laddr, raddr, d.Timeout)
+}
+
+// DialUTPTimeout acts like Dial but takes a timeout.
+// The timeout includes name resolution, if required.
+func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (net.Conn, error) {
+
+	udpnet, err := utp2udp(n)
+	if err != nil {
+		return nil, err
+	}
+	s := ":0"
+	if laddr != nil {
+		s = laddr.String()
+	}
+	conn, err := net.ListenPacket(udpnet, s)
+	if err != nil {
+		return nil, err
+	}
+
+	return newDialerConn(conn, raddr), nil
+}
+
+type dialerConn struct {
+	conn  net.PacketConn
+	raddr net.Addr
+
+	rdeadline     time.Time
+	wdeadline     time.Time
+	deadlineMutex sync.RWMutex
+}
+
+func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
+	c := &dialerConn{
+		conn:  conn,
+		raddr: raddr,
+	}
+	return c
+}
+
+func (c *dialerConn) Read(b []byte) (int, error) {
+	return 0, nil
+}
+
+func (c *dialerConn) Write(b []byte) (int, error) {
+	return 0, nil
+}
+
+func (c *dialerConn) Close() error         { return nil }
+func (c *dialerConn) LocalAddr() net.Addr  { return nil }
+func (c *dialerConn) RemoteAddr() net.Addr { return nil }
+
+func (c *dialerConn) SetDeadline(t time.Time) error {
+	err := c.SetReadDeadline(t)
+	if err != nil {
+		return err
+	}
+	return c.SetWriteDeadline(t)
+}
+
+func (c *dialerConn) SetReadDeadline(t time.Time) error {
+	c.deadlineMutex.Lock()
+	defer c.deadlineMutex.Unlock()
+	c.rdeadline = t
+	return nil
+}
+
+func (c *dialerConn) SetWriteDeadline(t time.Time) error {
+	c.deadlineMutex.Lock()
+	defer c.deadlineMutex.Unlock()
+	c.wdeadline = t
+	return nil
 }
 
 /*
