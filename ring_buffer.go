@@ -37,7 +37,23 @@ func (r *ringBuffer) Pop() ([]byte, error) {
 	return b, nil
 }
 
+func (r *ringBuffer) Front() ([]byte, uint16) {
+	r.m.RLock()
+	defer r.m.RUnlock()
+	return r.b[r.begin], r.seq
+}
+
 func (r *ringBuffer) Erase(seq uint16) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	i := r.getIndex(seq)
+	if i >= 0 && r.b[i] != nil {
+		r.b[i] = nil
+		r.cond.Signal()
+	}
+}
+
+func (r *ringBuffer) EraseAll(seq uint16) {
 	r.m.Lock()
 	defer r.m.Unlock()
 	for r.seq != seq {
@@ -84,9 +100,9 @@ func (r *ringBuffer) Ack() uint16 {
 }
 
 func (r *ringBuffer) Window() int {
-  r.m.RLock()
-  defer r.m.RUnlock()
-  return r.writable()
+	r.m.RLock()
+	defer r.m.RUnlock()
+	return r.writable()
 }
 
 func (r *ringBuffer) getIndex(seq uint16) int {

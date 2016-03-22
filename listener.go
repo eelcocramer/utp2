@@ -255,7 +255,7 @@ func (c *listenerConn) processPacket(p *packet) {
 		c.ack = c.recvBuf.Ack()
 		c.sendACK()
 	case stState:
-		c.sendBuf.Erase(p.header.ack)
+		c.sendBuf.EraseAll(p.header.ack)
 	case stFin:
 	}
 	fmt.Println("#", p)
