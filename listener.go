@@ -220,6 +220,10 @@ type listenerConn struct {
 	recvBuf  *ringBuffer
 	recvRest []byte
 	sendBuf  *ringBuffer
+
+	rdeadline     time.Time
+	wdeadline     time.Time
+	deadlineMutex sync.RWMutex
 }
 
 func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
@@ -303,12 +307,32 @@ func (c *listenerConn) Write(b []byte) (int, error) {
 	return l, nil
 }
 
-func (c *listenerConn) Close() error                       { return nil }
-func (c *listenerConn) LocalAddr() net.Addr                { return c.bcon.conn.LocalAddr() }
-func (c *listenerConn) RemoteAddr() net.Addr               { return c.raddr }
-func (c *listenerConn) SetDeadline(t time.Time) error      { return nil }
-func (c *listenerConn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *listenerConn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *listenerConn) Close() error         { return nil }
+func (c *listenerConn) LocalAddr() net.Addr  { return c.bcon.conn.LocalAddr() }
+func (c *listenerConn) RemoteAddr() net.Addr { return c.raddr }
+
+func (c *listenerConn) SetDeadline(t time.Time) error {
+	err := c.SetReadDeadline(t)
+	if err != nil {
+		return err
+	}
+	return c.SetWriteDeadline(t)
+}
+
+func (c *listenerConn) SetReadDeadline(t time.Time) error {
+	c.deadlineMutex.Lock()
+	defer c.deadlineMutex.Unlock()
+	c.rdeadline = t
+	return nil
+}
+
+func (c *listenerConn) SetWriteDeadline(t time.Time) error {
+	c.deadlineMutex.Lock()
+	defer c.deadlineMutex.Unlock()
+	c.wdeadline = t
+	return nil
+}
+
 func (c *listenerConn) index() uint16 {
 	return c.rid
 }
