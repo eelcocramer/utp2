@@ -2,6 +2,8 @@ package utp
 
 import (
 	"errors"
+	"math"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -84,11 +86,16 @@ type dialerConn struct {
 }
 
 func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
+	id := uint16(rand.Intn(math.MaxUint16))
 	c := &dialerConn{
 		conn:    conn,
 		raddr:   raddr,
-		recvBuf: NewRingBuffer(windowSize, 0),
-		sendBuf: NewRingBuffer(windowSize, 0),
+		rid:     id,
+		sid:     id + 1,
+		seq:     1,
+		ack:     0,
+		recvBuf: nil,
+		sendBuf: NewRingBuffer(windowSize, 1),
 	}
 	return c
 }
@@ -127,8 +134,28 @@ func (c *dialerConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+func (c *dialerConn) send(p *packet) error {
+	b, err := p.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = c.conn.WriteTo(b, p.addr)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *dialerConn) sendSYN() {
+	syn := c.makePacket(stSyn, nil, c.raddr)
+	c.send(syn)
+}
+
 func (c *dialerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet {
-	wnd := c.recvBuf.Window() * mtu
+	wnd := windowSize * mtu
+	if c.recvBuf != nil {
+		wnd = c.recvBuf.Window() * mtu
+	}
 	id := c.sid
 	if typ == stSyn {
 		id = c.rid
