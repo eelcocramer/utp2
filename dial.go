@@ -69,8 +69,14 @@ func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (net.Co
 }
 
 type dialerConn struct {
-	conn  net.PacketConn
-	raddr net.Addr
+	conn               net.PacketConn
+	raddr              net.Addr
+	rid, sid, seq, ack uint16
+	diff               uint32
+
+	recvBuf  *ringBuffer
+	recvRest []byte
+	sendBuf  *ringBuffer
 
 	rdeadline     time.Time
 	wdeadline     time.Time
@@ -79,8 +85,10 @@ type dialerConn struct {
 
 func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
 	c := &dialerConn{
-		conn:  conn,
-		raddr: raddr,
+		conn:    conn,
+		raddr:   raddr,
+		recvBuf: NewRingBuffer(windowSize, 0),
+		sendBuf: NewRingBuffer(windowSize, 0),
 	}
 	return c
 }
@@ -117,6 +125,29 @@ func (c *dialerConn) SetWriteDeadline(t time.Time) error {
 	defer c.deadlineMutex.Unlock()
 	c.wdeadline = t
 	return nil
+}
+
+func (c *dialerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet {
+	wnd := c.recvBuf.Window() * mtu
+	id := c.sid
+	if typ == stSyn {
+		id = c.rid
+	}
+	p := &packet{}
+	p.header.typ = typ
+	p.header.ver = version
+	p.header.id = id
+	p.header.t = currentMicrosecond()
+	p.header.diff = c.diff
+	p.header.wnd = uint32(wnd)
+	p.header.seq = c.seq
+	p.header.ack = c.ack
+	p.addr = dst
+	if typ != stState && typ != stFin {
+		c.seq++
+	}
+	p.payload = payload
+	return p
 }
 
 /*
