@@ -2,6 +2,7 @@ package utp
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"net"
@@ -96,7 +97,7 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
 		sid:          id + 1,
 		seq:          1,
 		ack:          0,
-		recvBuf:      nil,
+		recvBuf:      NewRingBuffer(windowSize, 1),
 		sendBuf:      NewRingBuffer(windowSize, 1),
 		outOfBandBuf: NewRingQueue(outOfBandBufferSize),
 	}
@@ -106,11 +107,34 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
 }
 
 func (c *dialerConn) Read(b []byte) (int, error) {
-	return 0, nil
+	if len(c.recvRest) > 0 {
+		l := copy(b, c.recvRest)
+		c.recvRest = c.recvRest[l:]
+		return l, nil
+	}
+	p, err := c.recvBuf.Pop()
+	if err != nil {
+		return 0, err
+	}
+	l := copy(b, p)
+	c.recvRest = p[l:]
+	return l, nil
 }
 
 func (c *dialerConn) Write(b []byte) (int, error) {
-	return 0, nil
+	payload := b
+	if len(payload) > mss {
+		payload = payload[:mss]
+	}
+	_, err := c.sendBuf.Push(payload)
+	if err != nil {
+		return 0, err
+	}
+	l, err := c.sendDATA(payload)
+	if err != nil {
+		return 0, err
+	}
+	return l, nil
 }
 
 func (c *dialerConn) Close() error         { return nil }
@@ -166,6 +190,17 @@ func (c *dialerConn) processPacket(p *packet) {
 			c.diff = t - p.header.t
 		}
 	}
+
+	switch p.header.typ {
+	case stData:
+		c.recvBuf.Put(p.payload, p.header.seq)
+		c.ack = c.recvBuf.Ack()
+		c.sendACK()
+	case stState:
+		c.sendBuf.EraseAll(p.header.ack)
+	case stFin:
+	}
+	fmt.Println("#", p)
 }
 
 func (c *dialerConn) send(p *packet) error {
@@ -183,6 +218,17 @@ func (c *dialerConn) send(p *packet) error {
 func (c *dialerConn) sendSYN() {
 	syn := c.makePacket(stSyn, nil, c.raddr)
 	c.send(syn)
+}
+
+func (c *dialerConn) sendACK() {
+	ack := c.makePacket(stState, nil, c.raddr)
+	c.send(ack)
+}
+
+func (c *dialerConn) sendDATA(b []byte) (int, error) {
+	data := c.makePacket(stData, b, c.raddr)
+	c.send(data)
+	return len(b), nil
 }
 
 func (c *dialerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet {
