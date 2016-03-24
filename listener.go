@@ -152,7 +152,7 @@ func (c *listenerBaseConn) listen() {
 			return
 		}
 
-		p, err := c.decodePacket(buf[:n])
+		p, err := decodePacket(buf[:n])
 		if err != nil {
 			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
 		} else {
@@ -197,18 +197,6 @@ func (c *listenerBaseConn) send(p *packet) error {
 		return err
 	}
 	return nil
-}
-
-func (c *listenerBaseConn) decodePacket(b []byte) (*packet, error) {
-	var p packet
-	err := p.UnmarshalBinary(b)
-	if err != nil {
-		return nil, err
-	}
-	if p.header.ver != version {
-		return nil, errors.New("unsupported utp version")
-	}
-	return &p, nil
 }
 
 type listenerConn struct {
@@ -362,6 +350,18 @@ func (c *listenerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet
 
 func currentMicrosecond() uint32 {
 	return uint32(time.Now().Nanosecond() / 1000)
+}
+
+func decodePacket(b []byte) (*packet, error) {
+	var p packet
+	err := p.UnmarshalBinary(b)
+	if err != nil {
+		return nil, err
+	}
+	if p.header.ver != version {
+		return nil, errors.New("unsupported utp version")
+	}
+	return &p, nil
 }
 
 /*

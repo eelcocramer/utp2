@@ -83,21 +83,25 @@ type dialerConn struct {
 	rdeadline     time.Time
 	wdeadline     time.Time
 	deadlineMutex sync.RWMutex
+
+	outOfBandBuf *ringQueue
 }
 
 func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
 	id := uint16(rand.Intn(math.MaxUint16))
 	c := &dialerConn{
-		conn:    conn,
-		raddr:   raddr,
-		rid:     id,
-		sid:     id + 1,
-		seq:     1,
-		ack:     0,
-		recvBuf: nil,
-		sendBuf: NewRingBuffer(windowSize, 1),
+		conn:         conn,
+		raddr:        raddr,
+		rid:          id,
+		sid:          id + 1,
+		seq:          1,
+		ack:          0,
+		recvBuf:      nil,
+		sendBuf:      NewRingBuffer(windowSize, 1),
+		outOfBandBuf: NewRingQueue(outOfBandBufferSize),
 	}
 	c.sendSYN()
+	go c.listen()
 	return c
 }
 
@@ -133,6 +137,35 @@ func (c *dialerConn) SetWriteDeadline(t time.Time) error {
 	defer c.deadlineMutex.Unlock()
 	c.wdeadline = t
 	return nil
+}
+
+func (c *dialerConn) listen() {
+	for {
+		var buf [maxUdpPayload]byte
+		n, addr, err := c.conn.ReadFrom(buf[:])
+		if err != nil {
+			c.outOfBandBuf.Close()
+			return
+		}
+
+		p, err := decodePacket(buf[:n])
+		if err != nil {
+			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
+		} else {
+			c.processPacket(p)
+		}
+	}
+}
+
+func (c *dialerConn) processPacket(p *packet) {
+	if p.header.t == 0 {
+		c.diff = 0
+	} else {
+		t := currentMicrosecond()
+		if t > p.header.t {
+			c.diff = t - p.header.t
+		}
+	}
 }
 
 func (c *dialerConn) send(p *packet) error {
