@@ -11,6 +11,10 @@ func main() {
 	numcpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(numcpu)
 
+	addr, _ := utp.ResolveAddr("utp4", ":0")
+	d := utp.Dialer{LocalAddr: addr}
+	fmt.Println(d.Dial("utp4", "127.0.0.1:33333"))
+
 	addr, err := utp.ResolveAddr("utp", "")
 	listener, err := utp.Listen("utp", addr)
 	fmt.Println(listener.RawConn.LocalAddr(), err)

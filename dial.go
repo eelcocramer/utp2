@@ -97,6 +97,7 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
 		recvBuf: nil,
 		sendBuf: NewRingBuffer(windowSize, 1),
 	}
+	c.sendSYN()
 	return c
 }
 
@@ -139,7 +140,7 @@ func (c *dialerConn) send(p *packet) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.conn.WriteTo(b, p.addr)
+	_, err = c.conn.WriteTo(b, p.addr.(*Addr).Addr)
 	if err != nil {
 		return err
 	}
