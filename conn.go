@@ -1,7 +1,10 @@
 package utp
 
 import (
+	"math"
+	"math/rand"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -11,6 +14,104 @@ type Conn struct {
 	// RawConn represents an out-of-band connection.
 	// This allows a single socket to handle multiple protocols.
 	RawConn net.PacketConn
+
+	conn net.PacketConn
+
+	raddr              *Addr
+	rid, sid, seq, ack uint16
+	diff               uint32
+
+	recvBuf  *ringBuffer
+	recvRest []byte
+	sendBuf  *ringBuffer
+
+	rdeadline     time.Time
+	wdeadline     time.Time
+	deadlineMutex sync.RWMutex
+
+	outOfBandBuf *ringQueue
+}
+
+func newDialerConn2(conn net.PacketConn, raddr *Addr) *Conn {
+	id := uint16(rand.Intn(math.MaxUint16))
+	c := &Conn{
+		RawConn:      conn,
+		conn:         conn,
+		raddr:        raddr,
+		rid:          id,
+		sid:          id + 1,
+		seq:          1,
+		ack:          0,
+		recvBuf:      NewRingBuffer(windowSize, 1),
+		sendBuf:      NewRingBuffer(windowSize, 1),
+		outOfBandBuf: NewRingQueue(outOfBandBufferSize),
+	}
+
+	c.sendSYN()
+	return c
+}
+
+func newListenerConn2(bcon *listenerBaseConn, p *packet) *Conn {
+	seq := rand.Intn(math.MaxUint16)
+	c := &Conn{
+		RawConn: bcon,
+		conn:    bcon.conn,
+		raddr:   p.addr,
+		rid:     p.header.id + 1,
+		sid:     p.header.id,
+		seq:     uint16(seq),
+		ack:     p.header.seq,
+		recvBuf: NewRingBuffer(windowSize, p.header.seq+1),
+		sendBuf: NewRingBuffer(windowSize, uint16(seq)),
+	}
+
+	c.sendACK()
+	return c
+}
+
+func (c *Conn) send(p *packet) error {
+	b, err := p.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = c.conn.WriteTo(b, p.addr.Addr)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Conn) sendSYN() {
+	syn := c.makePacket(stSyn, nil, c.raddr)
+	c.send(syn)
+}
+
+func (c *Conn) sendACK() {
+	ack := c.makePacket(stState, nil, c.raddr)
+	c.send(ack)
+}
+
+func (c *Conn) makePacket(typ int, payload []byte, dst *Addr) *packet {
+	wnd := c.recvBuf.Window() * mtu
+	id := c.sid
+	if typ == stSyn {
+		id = c.rid
+	}
+	p := &packet{}
+	p.header.typ = typ
+	p.header.ver = version
+	p.header.id = id
+	p.header.t = currentMicrosecond()
+	p.header.diff = c.diff
+	p.header.wnd = uint32(wnd)
+	p.header.seq = c.seq
+	p.header.ack = c.ack
+	p.addr = dst
+	if typ != stState && typ != stFin {
+		c.seq++
+	}
+	p.payload = payload
+	return p
 }
 
 func (c *Conn) Read(b []byte) (n int, err error) {
