@@ -1,9 +1,6 @@
 package utp
 
 import (
-	"fmt"
-	"math"
-	"math/rand"
 	"net"
 	"sync"
 	"syscall"
@@ -53,7 +50,7 @@ func (l *Listener) AcceptUTP() (net.Conn, error) {
 
 type listenerBaseConn struct {
 	conn    net.PacketConn
-	sockets map[uint16]*listenerConn
+	sockets map[uint16]*Conn
 
 	recvChan  chan *udpPacket
 	closeChan chan int
@@ -71,7 +68,7 @@ type udpPacket struct {
 func newListenerBaseConn(conn net.PacketConn) *listenerBaseConn {
 	c := &listenerBaseConn{
 		conn:              conn,
-		sockets:           make(map[uint16]*listenerConn),
+		sockets:           make(map[uint16]*Conn),
 		recvChan:          make(chan *udpPacket),
 		closeChan:         make(chan int),
 		outOfBandBuf:      NewRingQueue(outOfBandBufferSize),
@@ -158,10 +155,10 @@ func (c *listenerBaseConn) listen() {
 			p.addr = &Addr{Addr: addr}
 			if p.header.typ == stSyn {
 				if c.waitingSocketsBuf.Get(p.header.id+1) == nil {
-					c.waitingSocketsBuf.Push(newListenerConn(c, p))
+					c.waitingSocketsBuf.Push(newListenerConn2(c, p))
 				}
 			} else if i := c.waitingSocketsBuf.Get(p.header.id); i != nil {
-				i.(*listenerConn).processPacket(p)
+				i.(*Conn).processPacket(p)
 			} else {
 				c.m.RLock()
 				s := c.sockets[p.header.id]
@@ -174,14 +171,14 @@ func (c *listenerBaseConn) listen() {
 	}
 }
 
-func (c *listenerBaseConn) accept() (*listenerConn, error) {
+func (c *listenerBaseConn) accept() (*Conn, error) {
 	i, err := c.waitingSocketsBuf.Pop()
 	if err != nil {
 		return nil, err
 	}
 	c.m.Lock()
 	defer c.m.Unlock()
-	conn := i.(*listenerConn)
+	conn := i.(*Conn)
 	c.sockets[conn.rid] = conn
 	return conn, nil
 }
@@ -196,155 +193,6 @@ func (c *listenerBaseConn) send(p *packet) error {
 		return err
 	}
 	return nil
-}
-
-type listenerConn struct {
-	bcon               *listenerBaseConn
-	raddr              *Addr
-	rid, sid, seq, ack uint16
-	diff               uint32
-
-	recvBuf  *ringBuffer
-	recvRest []byte
-	sendBuf  *ringBuffer
-
-	rdeadline     time.Time
-	wdeadline     time.Time
-	deadlineMutex sync.RWMutex
-}
-
-func newListenerConn(bcon *listenerBaseConn, p *packet) *listenerConn {
-	seq := rand.Intn(math.MaxUint16)
-	c := &listenerConn{
-		bcon:    bcon,
-		raddr:   p.addr,
-		rid:     p.header.id + 1,
-		sid:     p.header.id,
-		seq:     uint16(seq),
-		ack:     p.header.seq,
-		recvBuf: NewRingBuffer(windowSize, p.header.seq+1),
-		sendBuf: NewRingBuffer(windowSize, uint16(seq)),
-	}
-
-	c.sendACK()
-	return c
-}
-
-func (c *listenerConn) processPacket(p *packet) {
-	if p.header.t == 0 {
-		c.diff = 0
-	} else {
-		t := currentMicrosecond()
-		if t > p.header.t {
-			c.diff = t - p.header.t
-		}
-	}
-
-	switch p.header.typ {
-	case stData:
-		c.recvBuf.Put(p.payload, p.header.seq)
-		c.ack = c.recvBuf.Ack()
-		c.sendACK()
-	case stState:
-		c.sendBuf.EraseAll(p.header.ack)
-	case stFin:
-	}
-	fmt.Println("#", p)
-}
-
-func (c *listenerConn) sendACK() {
-	ack := c.makePacket(stState, nil, c.raddr)
-	c.bcon.send(ack)
-}
-
-func (c *listenerConn) sendDATA(b []byte) (int, error) {
-	data := c.makePacket(stData, b, c.raddr)
-	c.bcon.send(data)
-	return len(b), nil
-}
-
-func (c *listenerConn) Read(b []byte) (int, error) {
-	if len(c.recvRest) > 0 {
-		l := copy(b, c.recvRest)
-		c.recvRest = c.recvRest[l:]
-		return l, nil
-	}
-	p, err := c.recvBuf.Pop()
-	if err != nil {
-		return 0, err
-	}
-	l := copy(b, p)
-	c.recvRest = p[l:]
-	return l, nil
-}
-
-func (c *listenerConn) Write(b []byte) (int, error) {
-	payload := b
-	if len(payload) > mss {
-		payload = payload[:mss]
-	}
-	_, err := c.sendBuf.Push(payload)
-	if err != nil {
-		return 0, err
-	}
-	l, err := c.sendDATA(payload)
-	if err != nil {
-		return 0, err
-	}
-	return l, nil
-}
-
-func (c *listenerConn) Close() error         { return nil }
-func (c *listenerConn) LocalAddr() net.Addr  { return c.bcon.conn.LocalAddr() }
-func (c *listenerConn) RemoteAddr() net.Addr { return c.raddr }
-
-func (c *listenerConn) SetDeadline(t time.Time) error {
-	err := c.SetReadDeadline(t)
-	if err != nil {
-		return err
-	}
-	return c.SetWriteDeadline(t)
-}
-
-func (c *listenerConn) SetReadDeadline(t time.Time) error {
-	c.deadlineMutex.Lock()
-	defer c.deadlineMutex.Unlock()
-	c.rdeadline = t
-	return nil
-}
-
-func (c *listenerConn) SetWriteDeadline(t time.Time) error {
-	c.deadlineMutex.Lock()
-	defer c.deadlineMutex.Unlock()
-	c.wdeadline = t
-	return nil
-}
-
-func (c *listenerConn) index() uint16 {
-	return c.rid
-}
-
-func (c *listenerConn) makePacket(typ int, payload []byte, dst *Addr) *packet {
-	wnd := c.recvBuf.Window() * mtu
-	id := c.sid
-	if typ == stSyn {
-		id = c.rid
-	}
-	p := &packet{}
-	p.header.typ = typ
-	p.header.ver = version
-	p.header.id = id
-	p.header.t = currentMicrosecond()
-	p.header.diff = c.diff
-	p.header.wnd = uint32(wnd)
-	p.header.seq = c.seq
-	p.header.ack = c.ack
-	p.addr = dst
-	if typ != stState && typ != stFin {
-		c.seq++
-	}
-	p.payload = payload
-	return p
 }
 
 /*
