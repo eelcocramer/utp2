@@ -2,11 +2,7 @@ package utp
 
 import (
 	"errors"
-	"fmt"
-	"math"
-	"math/rand"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -33,7 +29,7 @@ type Dialer struct {
 // Dial connects to the address on the named network.
 //
 // See func Dial for a description of the network and address parameters.
-func (d *Dialer) Dial(n, addr string) (net.Conn, error) {
+func (d *Dialer) Dial(n, addr string) (*Conn, error) {
 	raddr, err := ResolveAddr(n, addr)
 	if err != nil {
 		return nil, err
@@ -53,7 +49,7 @@ func (d *Dialer) Dial(n, addr string) (net.Conn, error) {
 
 // DialUTPTimeout acts like Dial but takes a timeout.
 // The timeout includes name resolution, if required.
-func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (net.Conn, error) {
+func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (*Conn, error) {
 
 	udpnet, err := utp2udp(n)
 	if err != nil {
@@ -68,196 +64,7 @@ func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (net.Co
 		return nil, err
 	}
 
-	return newDialerConn(conn, raddr), nil
-}
-
-type dialerConn struct {
-	conn               net.PacketConn
-	raddr              *Addr
-	rid, sid, seq, ack uint16
-	diff               uint32
-
-	recvBuf  *ringBuffer
-	recvRest []byte
-	sendBuf  *ringBuffer
-
-	rdeadline     time.Time
-	wdeadline     time.Time
-	deadlineMutex sync.RWMutex
-
-	outOfBandBuf *ringQueue
-}
-
-func newDialerConn(conn net.PacketConn, raddr *Addr) *dialerConn {
-	id := uint16(rand.Intn(math.MaxUint16))
-	c := &dialerConn{
-		conn:         conn,
-		raddr:        raddr,
-		rid:          id,
-		sid:          id + 1,
-		seq:          1,
-		ack:          0,
-		recvBuf:      NewRingBuffer(windowSize, 1),
-		sendBuf:      NewRingBuffer(windowSize, 1),
-		outOfBandBuf: NewRingQueue(outOfBandBufferSize),
-	}
-	c.sendSYN()
-	go c.listen()
-	return c
-}
-
-func (c *dialerConn) Read(b []byte) (int, error) {
-	if len(c.recvRest) > 0 {
-		l := copy(b, c.recvRest)
-		c.recvRest = c.recvRest[l:]
-		return l, nil
-	}
-	p, err := c.recvBuf.Pop()
-	if err != nil {
-		return 0, err
-	}
-	l := copy(b, p)
-	c.recvRest = p[l:]
-	return l, nil
-}
-
-func (c *dialerConn) Write(b []byte) (int, error) {
-	payload := b
-	if len(payload) > mss {
-		payload = payload[:mss]
-	}
-	_, err := c.sendBuf.Push(payload)
-	if err != nil {
-		return 0, err
-	}
-	l, err := c.sendDATA(payload)
-	if err != nil {
-		return 0, err
-	}
-	return l, nil
-}
-
-func (c *dialerConn) Close() error         { return nil }
-func (c *dialerConn) LocalAddr() net.Addr  { return nil }
-func (c *dialerConn) RemoteAddr() net.Addr { return nil }
-
-func (c *dialerConn) SetDeadline(t time.Time) error {
-	err := c.SetReadDeadline(t)
-	if err != nil {
-		return err
-	}
-	return c.SetWriteDeadline(t)
-}
-
-func (c *dialerConn) SetReadDeadline(t time.Time) error {
-	c.deadlineMutex.Lock()
-	defer c.deadlineMutex.Unlock()
-	c.rdeadline = t
-	return nil
-}
-
-func (c *dialerConn) SetWriteDeadline(t time.Time) error {
-	c.deadlineMutex.Lock()
-	defer c.deadlineMutex.Unlock()
-	c.wdeadline = t
-	return nil
-}
-
-func (c *dialerConn) listen() {
-	for {
-		var buf [maxUdpPayload]byte
-		n, addr, err := c.conn.ReadFrom(buf[:])
-		if err != nil {
-			c.outOfBandBuf.Close()
-			return
-		}
-
-		p, err := decodePacket(buf[:n])
-		if err != nil {
-			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
-		} else {
-			c.processPacket(p)
-		}
-	}
-}
-
-func (c *dialerConn) processPacket(p *packet) {
-	if p.header.t == 0 {
-		c.diff = 0
-	} else {
-		t := currentMicrosecond()
-		if t > p.header.t {
-			c.diff = t - p.header.t
-		}
-	}
-
-	switch p.header.typ {
-	case stData:
-		c.recvBuf.Put(p.payload, p.header.seq)
-		c.ack = c.recvBuf.Ack()
-		c.sendACK()
-	case stState:
-		if p.header.ack == 1 {
-			c.recvBuf.SetSeq(p.header.seq)
-		}
-		c.sendBuf.EraseAll(p.header.ack)
-	case stFin:
-	}
-	fmt.Println("#", p)
-}
-
-func (c *dialerConn) send(p *packet) error {
-	b, err := p.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = c.conn.WriteTo(b, p.addr.Addr)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *dialerConn) sendSYN() {
-	syn := c.makePacket(stSyn, nil, c.raddr)
-	c.send(syn)
-}
-
-func (c *dialerConn) sendACK() {
-	ack := c.makePacket(stState, nil, c.raddr)
-	c.send(ack)
-}
-
-func (c *dialerConn) sendDATA(b []byte) (int, error) {
-	data := c.makePacket(stData, b, c.raddr)
-	c.send(data)
-	return len(b), nil
-}
-
-func (c *dialerConn) makePacket(typ int, payload []byte, dst *Addr) *packet {
-	wnd := windowSize * mtu
-	if c.recvBuf != nil {
-		wnd = c.recvBuf.Window() * mtu
-	}
-	id := c.sid
-	if typ == stSyn {
-		id = c.rid
-	}
-	p := &packet{}
-	p.header.typ = typ
-	p.header.ver = version
-	p.header.id = id
-	p.header.t = currentMicrosecond()
-	p.header.diff = c.diff
-	p.header.wnd = uint32(wnd)
-	p.header.seq = c.seq
-	p.header.ack = c.ack
-	p.addr = dst
-	if typ != stState && typ != stFin {
-		c.seq++
-	}
-	p.payload = payload
-	return p
+	return newDialerConn2(conn, raddr), nil
 }
 
 /*
