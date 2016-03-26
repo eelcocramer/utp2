@@ -1,7 +1,6 @@
 package utp
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -346,22 +345,6 @@ func (c *listenerConn) makePacket(typ int, payload []byte, dst *Addr) *packet {
 	}
 	p.payload = payload
 	return p
-}
-
-func currentMicrosecond() uint32 {
-	return uint32(time.Now().Nanosecond() / 1000)
-}
-
-func decodePacket(b []byte) (*packet, error) {
-	var p packet
-	err := p.UnmarshalBinary(b)
-	if err != nil {
-		return nil, err
-	}
-	if p.header.ver != version {
-		return nil, errors.New("unsupported utp version")
-	}
-	return &p, nil
 }
 
 /*

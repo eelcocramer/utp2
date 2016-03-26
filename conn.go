@@ -1,6 +1,7 @@
 package utp
 
 import (
+	"errors"
 	"math"
 	"math/rand"
 	"net"
@@ -91,6 +92,12 @@ func (c *Conn) sendACK() {
 	c.send(ack)
 }
 
+func (c *Conn) sendDATA(b []byte) (int, error) {
+	data := c.makePacket(stData, b, c.raddr)
+	c.send(data)
+	return len(b), nil
+}
+
 func (c *Conn) makePacket(typ int, payload []byte, dst *Addr) *packet {
 	wnd := c.recvBuf.Window() * mtu
 	id := c.sid
@@ -122,28 +129,46 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 	return 0, nil
 }
 
-func (c *Conn) Close() error {
-	return nil
-}
-
-func (c *Conn) LocalAddr() net.Addr {
-	return nil
-}
-
-func (c *Conn) RemoteAddr() net.Addr {
-	return nil
-}
+func (c *Conn) Close() error         { return nil }
+func (c *Conn) LocalAddr() net.Addr  { return c.conn.LocalAddr() }
+func (c *Conn) RemoteAddr() net.Addr { return c.raddr }
 
 func (c *Conn) SetDeadline(t time.Time) error {
-	return nil
+	err := c.SetReadDeadline(t)
+	if err != nil {
+		return err
+	}
+	return c.SetWriteDeadline(t)
 }
 
 func (c *Conn) SetReadDeadline(t time.Time) error {
+	c.deadlineMutex.Lock()
+	defer c.deadlineMutex.Unlock()
+	c.rdeadline = t
 	return nil
 }
 
 func (c *Conn) SetWriteDeadline(t time.Time) error {
+	c.deadlineMutex.Lock()
+	defer c.deadlineMutex.Unlock()
+	c.wdeadline = t
 	return nil
+}
+
+func currentMicrosecond() uint32 {
+	return uint32(time.Now().Nanosecond() / 1000)
+}
+
+func decodePacket(b []byte) (*packet, error) {
+	var p packet
+	err := p.UnmarshalBinary(b)
+	if err != nil {
+		return nil, err
+	}
+	if p.header.ver != version {
+		return nil, errors.New("unsupported utp version")
+	}
+	return &p, nil
 }
 
 /*
