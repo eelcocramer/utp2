@@ -156,7 +156,7 @@ func (c *listenerBaseConn) listen() {
 		if err != nil {
 			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
 		} else {
-			p.addr = addr
+			p.addr = &Addr{Addr: addr}
 			if p.header.typ == stSyn {
 				if c.waitingSocketsBuf.Get(p.header.id+1) == nil {
 					c.waitingSocketsBuf.Push(newListenerConn(c, p))
@@ -192,7 +192,7 @@ func (c *listenerBaseConn) send(p *packet) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.conn.WriteTo(b, p.addr)
+	_, err = c.conn.WriteTo(b, p.addr.Addr)
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (c *listenerBaseConn) send(p *packet) error {
 
 type listenerConn struct {
 	bcon               *listenerBaseConn
-	raddr              net.Addr
+	raddr              *Addr
 	rid, sid, seq, ack uint16
 	diff               uint32
 
@@ -325,7 +325,7 @@ func (c *listenerConn) index() uint16 {
 	return c.rid
 }
 
-func (c *listenerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet {
+func (c *listenerConn) makePacket(typ int, payload []byte, dst *Addr) *packet {
 	wnd := c.recvBuf.Window() * mtu
 	id := c.sid
 	if typ == stSyn {

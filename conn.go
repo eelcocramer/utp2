@@ -1,8 +1,48 @@
 package utp
 
+import (
+	"net"
+	"time"
+)
+
 // Conn is an implementation of the Conn interface for UTP network
 // connections.
 type Conn struct {
+	// RawConn represents an out-of-band connection.
+	// This allows a single socket to handle multiple protocols.
+	RawConn net.PacketConn
+}
+
+func (c *Conn) Read(b []byte) (n int, err error) {
+	return 0, nil
+}
+
+func (c *Conn) Write(b []byte) (n int, err error) {
+	return 0, nil
+}
+
+func (c *Conn) Close() error {
+	return nil
+}
+
+func (c *Conn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (c *Conn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (c *Conn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *Conn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *Conn) SetWriteDeadline(t time.Time) error {
+	return nil
 }
 
 /*

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 )
 
 type header struct {
@@ -25,7 +24,7 @@ type packet struct {
 	header  header
 	ext     []extension
 	payload []byte
-	addr    net.Addr
+	addr    *Addr
 }
 
 func (p *packet) MarshalBinary() ([]byte, error) {

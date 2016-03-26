@@ -73,7 +73,7 @@ func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (net.Co
 
 type dialerConn struct {
 	conn               net.PacketConn
-	raddr              net.Addr
+	raddr              *Addr
 	rid, sid, seq, ack uint16
 	diff               uint32
 
@@ -197,7 +197,7 @@ func (c *dialerConn) processPacket(p *packet) {
 		c.ack = c.recvBuf.Ack()
 		c.sendACK()
 	case stState:
-		if (p.header.ack == 1) {
+		if p.header.ack == 1 {
 			c.recvBuf.SetSeq(p.header.seq)
 		}
 		c.sendBuf.EraseAll(p.header.ack)
@@ -211,7 +211,7 @@ func (c *dialerConn) send(p *packet) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.conn.WriteTo(b, p.addr.(*Addr).Addr)
+	_, err = c.conn.WriteTo(b, p.addr.Addr)
 	if err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func (c *dialerConn) sendDATA(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (c *dialerConn) makePacket(typ int, payload []byte, dst net.Addr) *packet {
+func (c *dialerConn) makePacket(typ int, payload []byte, dst *Addr) *packet {
 	wnd := windowSize * mtu
 	if c.recvBuf != nil {
 		wnd = c.recvBuf.Window() * mtu
