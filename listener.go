@@ -155,7 +155,7 @@ func (c *listenerBaseConn) listen() {
 			p.addr = &Addr{Addr: addr}
 			if p.header.typ == stSyn {
 				if c.waitingSocketsBuf.Get(p.header.id+1) == nil {
-					c.waitingSocketsBuf.Push(newListenerConn2(c, p))
+					c.waitingSocketsBuf.Push(newListenerConn(c, p))
 				}
 			} else if i := c.waitingSocketsBuf.Get(p.header.id); i != nil {
 				i.(*Conn).processPacket(p)

@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -36,7 +37,7 @@ type Conn struct {
 	outOfBandBuf *ringQueue
 }
 
-func newDialerConn2(conn net.PacketConn, raddr *Addr) *Conn {
+func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 	id := uint16(rand.Intn(math.MaxUint16))
 	c := &Conn{
 		RawConn:      conn,
@@ -56,7 +57,7 @@ func newDialerConn2(conn net.PacketConn, raddr *Addr) *Conn {
 	return c
 }
 
-func newListenerConn2(bcon *listenerBaseConn, p *packet) *Conn {
+func newListenerConn(bcon *listenerBaseConn, p *packet) *Conn {
 	seq := rand.Intn(math.MaxUint16)
 	c := &Conn{
 		RawConn: bcon,
@@ -173,6 +174,9 @@ func (c *Conn) makePacket(typ int, payload []byte, dst *Addr) *packet {
 }
 
 func (c *Conn) Read(b []byte) (int, error) {
+	if !c.ok() {
+		return 0, syscall.EINVAL
+	}
 	if len(c.recvRest) > 0 {
 		l := copy(b, c.recvRest)
 		c.recvRest = c.recvRest[l:]
@@ -188,6 +192,9 @@ func (c *Conn) Read(b []byte) (int, error) {
 }
 
 func (c *Conn) Write(b []byte) (int, error) {
+	if !c.ok() {
+		return 0, syscall.EINVAL
+	}
 	payload := b
 	if len(payload) > mss {
 		payload = payload[:mss]
@@ -203,11 +210,29 @@ func (c *Conn) Write(b []byte) (int, error) {
 	return l, nil
 }
 
-func (c *Conn) Close() error         { return nil }
-func (c *Conn) LocalAddr() net.Addr  { return c.conn.LocalAddr() }
-func (c *Conn) RemoteAddr() net.Addr { return c.raddr }
+func (c *Conn) Close() error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	return nil
+}
+func (c *Conn) LocalAddr() net.Addr {
+	if !c.ok() {
+		return nil
+	}
+	return c.conn.LocalAddr()
+}
+func (c *Conn) RemoteAddr() net.Addr {
+	if !c.ok() {
+		return nil
+	}
+	return c.raddr
+}
 
 func (c *Conn) SetDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
 	err := c.SetReadDeadline(t)
 	if err != nil {
 		return err
@@ -216,6 +241,9 @@ func (c *Conn) SetDeadline(t time.Time) error {
 }
 
 func (c *Conn) SetReadDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
 	c.deadlineMutex.Lock()
 	defer c.deadlineMutex.Unlock()
 	c.rdeadline = t
@@ -223,6 +251,9 @@ func (c *Conn) SetReadDeadline(t time.Time) error {
 }
 
 func (c *Conn) SetWriteDeadline(t time.Time) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
 	c.deadlineMutex.Lock()
 	defer c.deadlineMutex.Unlock()
 	c.wdeadline = t

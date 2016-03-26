@@ -64,7 +64,7 @@ func DialUTPTimeout(n string, laddr, raddr *Addr, timeout time.Duration) (*Conn,
 		return nil, err
 	}
 
-	return newDialerConn2(conn, raddr), nil
+	return newDialerConn(conn, raddr), nil
 }
 
 /*
