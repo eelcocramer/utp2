@@ -2,6 +2,7 @@ package utp
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"net"
@@ -26,6 +27,8 @@ type Conn struct {
 	recvRest []byte
 	sendBuf  *ringBuffer
 
+	seqInit bool
+
 	rdeadline     time.Time
 	wdeadline     time.Time
 	deadlineMutex sync.RWMutex
@@ -45,9 +48,10 @@ func newDialerConn2(conn net.PacketConn, raddr *Addr) *Conn {
 		ack:          0,
 		recvBuf:      NewRingBuffer(windowSize, 1),
 		sendBuf:      NewRingBuffer(windowSize, 1),
+		seqInit:      false,
 		outOfBandBuf: NewRingQueue(outOfBandBufferSize),
 	}
-
+	go c.listen()
 	c.sendSYN()
 	return c
 }
@@ -64,10 +68,31 @@ func newListenerConn2(bcon *listenerBaseConn, p *packet) *Conn {
 		ack:     p.header.seq,
 		recvBuf: NewRingBuffer(windowSize, p.header.seq+1),
 		sendBuf: NewRingBuffer(windowSize, uint16(seq)),
+		seqInit: true,
 	}
 
 	c.sendACK()
 	return c
+}
+
+func (c *Conn) ok() bool { return c != nil && c.conn != nil }
+
+func (c *Conn) listen() {
+	for {
+		var buf [maxUdpPayload]byte
+		n, addr, err := c.conn.ReadFrom(buf[:])
+		if err != nil {
+			c.outOfBandBuf.Close()
+			return
+		}
+
+		p, err := decodePacket(buf[:n])
+		if err != nil {
+			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
+		} else {
+			c.processPacket(p)
+		}
+	}
 }
 
 func (c *Conn) send(p *packet) error {
@@ -80,6 +105,32 @@ func (c *Conn) send(p *packet) error {
 		return err
 	}
 	return nil
+}
+
+func (c *Conn) processPacket(p *packet) {
+	if p.header.t == 0 {
+		c.diff = 0
+	} else {
+		t := currentMicrosecond()
+		if t > p.header.t {
+			c.diff = t - p.header.t
+		}
+	}
+
+	switch p.header.typ {
+	case stData:
+		c.recvBuf.Put(p.payload, p.header.seq)
+		c.ack = c.recvBuf.Ack()
+		c.sendACK()
+	case stState:
+		if !c.seqInit {
+			c.recvBuf.SetSeq(p.header.seq)
+			c.seqInit = true
+		}
+		c.sendBuf.EraseAll(p.header.ack)
+	case stFin:
+	}
+	fmt.Println("#", p)
 }
 
 func (c *Conn) sendSYN() {
@@ -121,12 +172,35 @@ func (c *Conn) makePacket(typ int, payload []byte, dst *Addr) *packet {
 	return p
 }
 
-func (c *Conn) Read(b []byte) (n int, err error) {
-	return 0, nil
+func (c *Conn) Read(b []byte) (int, error) {
+	if len(c.recvRest) > 0 {
+		l := copy(b, c.recvRest)
+		c.recvRest = c.recvRest[l:]
+		return l, nil
+	}
+	p, err := c.recvBuf.Pop()
+	if err != nil {
+		return 0, err
+	}
+	l := copy(b, p)
+	c.recvRest = p[l:]
+	return l, nil
 }
 
-func (c *Conn) Write(b []byte) (n int, err error) {
-	return 0, nil
+func (c *Conn) Write(b []byte) (int, error) {
+	payload := b
+	if len(payload) > mss {
+		payload = payload[:mss]
+	}
+	_, err := c.sendBuf.Push(payload)
+	if err != nil {
+		return 0, err
+	}
+	l, err := c.sendDATA(payload)
+	if err != nil {
+		return 0, err
+	}
+	return l, nil
 }
 
 func (c *Conn) Close() error         { return nil }
