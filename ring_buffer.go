@@ -105,6 +105,13 @@ func (r *ringBuffer) Window() int {
 	return r.writable()
 }
 
+func (r *ringBuffer) SetSeq(seq uint16) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	r.seq = seq
+	r.cond.Signal()
+}
+
 func (r *ringBuffer) getIndex(seq uint16) int {
 	i := int(seq) - int(r.seq)
 	if i < 0 {

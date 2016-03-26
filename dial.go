@@ -197,6 +197,9 @@ func (c *dialerConn) processPacket(p *packet) {
 		c.ack = c.recvBuf.Ack()
 		c.sendACK()
 	case stState:
+		if (p.header.ack == 1) {
+			c.recvBuf.SetSeq(p.header.seq)
+		}
 		c.sendBuf.EraseAll(p.header.ack)
 	case stFin:
 	}
