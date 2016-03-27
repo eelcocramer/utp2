@@ -15,11 +15,11 @@ const (
 	stSyn   = 4
 
 	stateClosed = iota
-	stateClosing
 	stateSynSent
 	stateSynRecv
 	stateConnected
 	stateFinSent
+	stateFinRecv
 
 	extNone         = 0
 	extSelectiveAck = 1

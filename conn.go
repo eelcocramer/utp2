@@ -133,6 +133,9 @@ func (c *Conn) listen() {
 }
 
 func (c *Conn) send(p *packet) error {
+	if p.header.typ == stFin {
+		c.state = stateFinRecv
+	}
 	b, err := p.MarshalBinary()
 	if err != nil {
 		return err
@@ -166,6 +169,7 @@ func (c *Conn) processPacket(p *packet) {
 		}
 		c.sendBuf.EraseAll(p.header.ack)
 	case stFin:
+		c.state = stateFinRecv
 	}
 	fmt.Println("#", p)
 }
@@ -176,6 +180,10 @@ func (c *Conn) sendSYN() {
 
 func (c *Conn) sendACK() {
 	c.sendChan <- &frame{typ: stState, payload: nil, dst: c.raddr}
+}
+
+func (c *Conn) sendFIN() {
+	c.sendChan <- &frame{typ: stFin, payload: nil, dst: c.raddr}
 }
 
 func (c *Conn) sendDATA(b []byte) (int, error) {
