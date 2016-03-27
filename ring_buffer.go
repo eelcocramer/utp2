@@ -6,11 +6,12 @@ import (
 )
 
 type ringBuffer struct {
-	b     [][]byte
-	begin int
-	seq   uint16
-	cond  *sync.Cond
-	m     sync.RWMutex
+	b      [][]byte
+	begin  int
+	seq    uint16
+	closed bool
+	cond   *sync.Cond
+	m      sync.RWMutex
 }
 
 func newRingBuffer(n, seq uint16) *ringBuffer {
@@ -26,8 +27,12 @@ func newRingBuffer(n, seq uint16) *ringBuffer {
 func (r *ringBuffer) Pop() ([]byte, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
-	for r.readable() == 0 {
+	w := r.readable()
+	for ; w == 0 && !r.closed; w = r.readable() {
 		r.cond.Wait()
+	}
+	if w == 0 && r.closed {
+		return nil, errClosing
 	}
 	b := r.b[r.begin]
 	r.b[r.begin] = nil
@@ -71,8 +76,11 @@ func (r *ringBuffer) Push(b []byte) (uint16, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
 	w := r.writable()
-	for ; w == 0; w = r.writable() {
+	for ; w == 0 && !r.closed; w = r.writable() {
 		r.cond.Wait()
+	}
+	if r.closed {
+		return 0, errClosing
 	}
 	seq := uint16((int(r.seq) + len(r.b) - w) % 65536)
 	i := r.getIndex(seq)
@@ -144,5 +152,9 @@ func (r *ringBuffer) writable() int {
 }
 
 func (r *ringBuffer) Close() error {
+	r.m.Lock()
+	defer r.m.Unlock()
+	r.closed = true
+	r.cond.Signal()
 	return nil
 }
