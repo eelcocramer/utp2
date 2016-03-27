@@ -21,17 +21,18 @@ func main() {
 			fmt.Println(buf[:l])
 		}
 	*/
-  
+
 	addr, err := utp.ResolveAddr("utp", "")
 	listener, err := utp.Listen("utp", addr)
 	fmt.Println(listener.RawConn.LocalAddr(), err)
 
 	c, _ := listener.AcceptUTP()
 	var buf [256]byte
-	for {
-		l, _ := c.Read(buf[:])
-		c.Write(buf[:l])
-		fmt.Println(buf[:l])
-	}
 
+	l, _ := c.Read(buf[:])
+	c.Write(buf[:l])
+	fmt.Println(buf[:l])
+	c.Close()
+	fmt.Println(c.Write(buf[:l]))
+	fmt.Println(c.Read(buf[:]))
 }

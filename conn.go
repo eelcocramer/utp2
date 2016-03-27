@@ -28,8 +28,9 @@ type Conn struct {
 	recvRest []byte
 	sendBuf  *ringBuffer
 
-	sendChan chan *frame
-	recvChan chan *packet
+	sendChan  chan *frame
+	recvChan  chan *packet
+	closeChan chan int
 
 	state int
 
@@ -65,6 +66,7 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 		sendBuf:      newRingBuffer(windowSize, 1),
 		sendChan:     make(chan *frame, 1),
 		recvChan:     make(chan *packet, 1),
+		closeChan:    make(chan int),
 		state:        stateSynSent,
 		outOfBandBuf: newRingQueue(outOfBandBufferSize),
 	}
@@ -77,18 +79,19 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 func newListenerConn(bcon *listenerBaseConn, p *packet) *Conn {
 	seq := rand.Intn(math.MaxUint16)
 	c := &Conn{
-		RawConn:  bcon,
-		conn:     bcon.conn,
-		raddr:    p.addr,
-		rid:      p.header.id + 1,
-		sid:      p.header.id,
-		seq:      uint16(seq),
-		ack:      p.header.seq,
-		recvBuf:  newRingBuffer(windowSize, p.header.seq+1),
-		sendBuf:  newRingBuffer(windowSize, uint16(seq)),
-		sendChan: make(chan *frame, 1),
-		recvChan: make(chan *packet, 1),
-		state:    stateSynRecv,
+		RawConn:   bcon,
+		conn:      bcon.conn,
+		raddr:     p.addr,
+		rid:       p.header.id + 1,
+		sid:       p.header.id,
+		seq:       uint16(seq),
+		ack:       p.header.seq,
+		recvBuf:   newRingBuffer(windowSize, p.header.seq+1),
+		sendBuf:   newRingBuffer(windowSize, uint16(seq)),
+		sendChan:  make(chan *frame, 1),
+		recvChan:  make(chan *packet, 1),
+		closeChan: make(chan int),
+		state:     stateSynRecv,
 	}
 	go c.loop()
 	c.sendACK()
@@ -120,6 +123,7 @@ func (c *Conn) listen() {
 		n, addr, err := c.conn.ReadFrom(buf[:])
 		if err != nil {
 			c.outOfBandBuf.Close()
+			close(c.recvChan)
 			return
 		}
 
@@ -134,7 +138,7 @@ func (c *Conn) listen() {
 
 func (c *Conn) send(p *packet) error {
 	if p.header.typ == stFin {
-		c.state = stateFinRecv
+		c.state = stateFinSent
 	}
 	b, err := p.MarshalBinary()
 	if err != nil {
@@ -166,6 +170,12 @@ func (c *Conn) processPacket(p *packet) {
 		if c.state == stateSynSent {
 			c.recvBuf.SetSeq(p.header.seq)
 			c.state = stateConnected
+		} else if c.state == stateFinSent {
+			if c.seq == p.header.ack {
+				c.state = stateClosed
+				c.recvBuf.Close()
+				c.conn.Close() // TODO:listener
+			}
 		}
 		c.sendBuf.EraseAll(p.header.ack)
 	case stFin:
@@ -257,6 +267,13 @@ func (c *Conn) Write(b []byte) (int, error) {
 func (c *Conn) Close() error {
 	if !c.ok() {
 		return syscall.EINVAL
+	}
+	select {
+	case <-c.closeChan:
+	default:
+		close(c.closeChan)
+		c.sendFIN()
+		c.sendBuf.Close()
 	}
 	return nil
 }
