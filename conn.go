@@ -28,6 +28,9 @@ type Conn struct {
 	recvRest []byte
 	sendBuf  *ringBuffer
 
+	sendChan chan *frame
+	recvChan chan *packet
+
 	seqInit bool
 
 	rdeadline     time.Time
@@ -35,6 +38,17 @@ type Conn struct {
 	deadlineMutex sync.RWMutex
 
 	outOfBandBuf *ringQueue
+}
+
+type udpPacket struct {
+	addr net.Addr
+	b    []byte
+}
+
+type frame struct {
+	typ     int
+	payload []byte
+	dst     *Addr
 }
 
 func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
@@ -49,9 +63,12 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 		ack:          0,
 		recvBuf:      NewRingBuffer(windowSize, 1),
 		sendBuf:      NewRingBuffer(windowSize, 1),
+		sendChan:     make(chan *frame, 1),
+		recvChan:     make(chan *packet, 1),
 		seqInit:      false,
 		outOfBandBuf: NewRingQueue(outOfBandBufferSize),
 	}
+	go c.loop()
 	go c.listen()
 	c.sendSYN()
 	return c
@@ -60,23 +77,42 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 func newListenerConn(bcon *listenerBaseConn, p *packet) *Conn {
 	seq := rand.Intn(math.MaxUint16)
 	c := &Conn{
-		RawConn: bcon,
-		conn:    bcon.conn,
-		raddr:   p.addr,
-		rid:     p.header.id + 1,
-		sid:     p.header.id,
-		seq:     uint16(seq),
-		ack:     p.header.seq,
-		recvBuf: NewRingBuffer(windowSize, p.header.seq+1),
-		sendBuf: NewRingBuffer(windowSize, uint16(seq)),
-		seqInit: true,
+		RawConn:  bcon,
+		conn:     bcon.conn,
+		raddr:    p.addr,
+		rid:      p.header.id + 1,
+		sid:      p.header.id,
+		seq:      uint16(seq),
+		ack:      p.header.seq,
+		recvBuf:  NewRingBuffer(windowSize, p.header.seq+1),
+		sendBuf:  NewRingBuffer(windowSize, uint16(seq)),
+		sendChan: make(chan *frame, 1),
+		recvChan: make(chan *packet, 1),
+		seqInit:  true,
 	}
-
+	go c.loop()
 	c.sendACK()
 	return c
 }
 
 func (c *Conn) ok() bool { return c != nil && c.conn != nil }
+
+func (c *Conn) loop() {
+	for {
+		select {
+		case p := <-c.recvChan:
+			if p == nil {
+				return
+			}
+			c.processPacket(p)
+		case f := <-c.sendChan:
+			if f == nil {
+				return
+			}
+			c.send(c.makePacket(f))
+		}
+	}
+}
 
 func (c *Conn) listen() {
 	for {
@@ -91,7 +127,7 @@ func (c *Conn) listen() {
 		if err != nil {
 			c.outOfBandBuf.Push(&udpPacket{b: buf[:n], addr: addr})
 		} else {
-			c.processPacket(p)
+			c.recvChan <- p
 		}
 	}
 }
@@ -135,29 +171,26 @@ func (c *Conn) processPacket(p *packet) {
 }
 
 func (c *Conn) sendSYN() {
-	syn := c.makePacket(stSyn, nil, c.raddr)
-	c.send(syn)
+	c.sendChan <- &frame{typ: stSyn, payload: nil, dst: c.raddr}
 }
 
 func (c *Conn) sendACK() {
-	ack := c.makePacket(stState, nil, c.raddr)
-	c.send(ack)
+	c.sendChan <- &frame{typ: stState, payload: nil, dst: c.raddr}
 }
 
 func (c *Conn) sendDATA(b []byte) (int, error) {
-	data := c.makePacket(stData, b, c.raddr)
-	c.send(data)
+	c.sendChan <- &frame{typ: stData, payload: b, dst: c.raddr}
 	return len(b), nil
 }
 
-func (c *Conn) makePacket(typ int, payload []byte, dst *Addr) *packet {
+func (c *Conn) makePacket(f *frame) *packet {
 	wnd := c.recvBuf.Window() * mtu
 	id := c.sid
-	if typ == stSyn {
+	if f.typ == stSyn {
 		id = c.rid
 	}
 	p := &packet{}
-	p.header.typ = typ
+	p.header.typ = f.typ
 	p.header.ver = version
 	p.header.id = id
 	p.header.t = currentMicrosecond()
@@ -165,11 +198,11 @@ func (c *Conn) makePacket(typ int, payload []byte, dst *Addr) *packet {
 	p.header.wnd = uint32(wnd)
 	p.header.seq = c.seq
 	p.header.ack = c.ack
-	p.addr = dst
-	if typ != stState && typ != stFin {
+	p.addr = f.dst
+	if f.typ != stState && f.typ != stFin {
 		c.seq++
 	}
-	p.payload = payload
+	p.payload = f.payload
 	return p
 }
 

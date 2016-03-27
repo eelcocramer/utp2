@@ -60,11 +60,6 @@ type listenerBaseConn struct {
 	m                 sync.RWMutex
 }
 
-type udpPacket struct {
-	addr net.Addr
-	b    []byte
-}
-
 func newListenerBaseConn(conn net.PacketConn) *listenerBaseConn {
 	c := &listenerBaseConn{
 		conn:              conn,
@@ -158,13 +153,13 @@ func (c *listenerBaseConn) listen() {
 					c.waitingSocketsBuf.Push(newListenerConn(c, p))
 				}
 			} else if i := c.waitingSocketsBuf.Get(p.header.id); i != nil {
-				i.(*Conn).processPacket(p)
+				i.(*Conn).recvChan <- p
 			} else {
 				c.m.RLock()
 				s := c.sockets[p.header.id]
 				c.m.RUnlock()
 				if s != nil {
-					s.processPacket(p)
+					s.recvChan <- p
 				}
 			}
 		}
