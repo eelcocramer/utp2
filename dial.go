@@ -40,7 +40,7 @@ func (d *Dialer) Dial(n, addr string) (*Conn, error) {
 		var ok bool
 		laddr, ok = d.LocalAddr.(*Addr)
 		if !ok {
-			return nil, errors.New("Dialer.LocalAddr is not a Addr")
+			return nil, errors.New("Dialer.LocalAddr is not an Addr")
 		}
 	}
 

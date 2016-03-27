@@ -31,7 +31,7 @@ type Conn struct {
 	sendChan chan *frame
 	recvChan chan *packet
 
-	seqInit bool
+	state int
 
 	rdeadline     time.Time
 	wdeadline     time.Time
@@ -65,7 +65,7 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 		sendBuf:      newRingBuffer(windowSize, 1),
 		sendChan:     make(chan *frame, 1),
 		recvChan:     make(chan *packet, 1),
-		seqInit:      false,
+		state:        stateSynSent,
 		outOfBandBuf: newRingQueue(outOfBandBufferSize),
 	}
 	go c.loop()
@@ -88,7 +88,7 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *Conn {
 		sendBuf:  newRingBuffer(windowSize, uint16(seq)),
 		sendChan: make(chan *frame, 1),
 		recvChan: make(chan *packet, 1),
-		seqInit:  true,
+		state:    stateSynRecv,
 	}
 	go c.loop()
 	c.sendACK()
@@ -160,9 +160,9 @@ func (c *Conn) processPacket(p *packet) {
 		c.ack = c.recvBuf.Ack()
 		c.sendACK()
 	case stState:
-		if !c.seqInit {
+		if c.state == stateSynSent {
 			c.recvBuf.SetSeq(p.header.seq)
-			c.seqInit = true
+			c.state = stateConnected
 		}
 		c.sendBuf.EraseAll(p.header.ack)
 	case stFin:

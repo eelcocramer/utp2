@@ -17,6 +17,7 @@ const (
 	stateClosed = iota
 	stateClosing
 	stateSynSent
+	stateSynRecv
 	stateConnected
 	stateFinSent
 
