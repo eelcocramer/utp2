@@ -23,18 +23,16 @@ const (
 	extNone         = 0
 	extSelectiveAck = 1
 
-	headerSize       = 20
-	mtu              = 3200
-	mss              = mtu - headerSize
-	windowSize       = 128
-	packetBufferSize = 256
-	readBufferSize   = 1048576
-	maxRetry         = 3
+	headerSize = 20
+	mtu        = 3200
+	mss        = mtu - headerSize
+	windowSize = 128
+	maxRetry   = 3
 
 	outOfBandBufferSize      = 128
 	waitingSocketsBufferSize = 128
 
-	maxUdpPayload = 65507
+	maxUDPPayload = 65507
 	resetTimeout  = time.Second
 )
 

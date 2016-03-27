@@ -23,7 +23,7 @@ type ringQueue struct {
 	index      map[uint16]interface{}
 }
 
-func NewRingQueue(size int) *ringQueue {
+func newRingQueue(size int) *ringQueue {
 	b := &ringQueue{
 		pushChan: make(chan interface{}),
 		popChan:  make(chan interface{}),

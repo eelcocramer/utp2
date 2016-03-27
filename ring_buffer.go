@@ -13,7 +13,7 @@ type ringBuffer struct {
 	m     sync.RWMutex
 }
 
-func NewRingBuffer(n, seq uint16) *ringBuffer {
+func newRingBuffer(n, seq uint16) *ringBuffer {
 	r := &ringBuffer{
 		b:     make([][]byte, n),
 		begin: 0,
@@ -119,9 +119,8 @@ func (r *ringBuffer) getIndex(seq uint16) int {
 	}
 	if i >= len(r.b) {
 		return -1
-	} else {
-		return (i + r.begin) % len(r.b)
 	}
+	return (i + r.begin) % len(r.b)
 }
 
 func (r *ringBuffer) readable() int {
