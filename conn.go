@@ -174,7 +174,9 @@ func (c *Conn) processPacket(p *packet) {
 			if c.seq == p.header.ack {
 				c.state = stateClosed
 				c.recvBuf.Close()
-				c.conn.Close() // TODO:listener
+				if c.RawConn == c.conn {
+					c.conn.Close()
+				}
 			}
 		}
 		c.sendBuf.EraseAll(p.header.ack)
