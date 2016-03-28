@@ -180,6 +180,9 @@ func (c *Conn) processPacket(p *packet) {
 		if c.eos < 0 {
 			c.eos = int(p.header.seq)
 		}
+	case stReset:
+		c.sendBuf.Close()
+		c.recvBuf.Close()
 	}
 
 	if c.eos >= 0 && c.eos == (int(c.ack)+1)%65536 {
@@ -199,6 +202,10 @@ func (c *Conn) sendACK() {
 
 func (c *Conn) sendFIN() {
 	c.sendChan <- &frame{typ: stFin, payload: nil, dst: c.raddr}
+}
+
+func (c *Conn) sendRESET() {
+	c.sendChan <- &frame{typ: stReset, payload: nil, dst: c.raddr}
 }
 
 func (c *Conn) sendDATA(b []byte) (int, error) {
