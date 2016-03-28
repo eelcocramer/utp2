@@ -33,6 +33,7 @@ type Conn struct {
 	closeChan chan int
 
 	state int
+	eos   int
 
 	rdeadline     time.Time
 	wdeadline     time.Time
@@ -68,6 +69,7 @@ func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 		recvChan:     make(chan *packet, 1),
 		closeChan:    make(chan int),
 		state:        stateSynSent,
+		eos:          -1,
 		outOfBandBuf: newRingQueue(outOfBandBufferSize),
 	}
 	go c.loop()
@@ -92,6 +94,7 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *Conn {
 		recvChan:  make(chan *packet, 1),
 		closeChan: make(chan int),
 		state:     stateSynRecv,
+		eos:       -1,
 	}
 	go c.loop()
 	c.sendACK()
@@ -139,6 +142,7 @@ func (c *Conn) listen() {
 func (c *Conn) send(p *packet) error {
 	if p.header.typ == stFin {
 		c.state = stateFinSent
+		c.sendBuf.Close()
 	}
 	b, err := p.MarshalBinary()
 	if err != nil {
@@ -170,19 +174,18 @@ func (c *Conn) processPacket(p *packet) {
 		if c.state == stateSynSent {
 			c.recvBuf.SetSeq(p.header.seq)
 			c.state = stateConnected
-		} else if c.state == stateFinSent {
-			if c.seq == p.header.ack {
-				c.state = stateClosed
-				c.recvBuf.Close()
-				if c.RawConn == c.conn {
-					c.conn.Close()
-				}
-			}
 		}
 		c.sendBuf.EraseAll(p.header.ack)
 	case stFin:
-		c.state = stateFinRecv
+		if c.eos < 0 {
+			c.eos = int(p.header.seq)
+		}
 	}
+
+	if c.eos >= 0 && c.eos == (int(c.ack)+1)%65536 {
+		c.recvBuf.Close()
+	}
+
 	fmt.Println("#", p)
 }
 
