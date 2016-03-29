@@ -158,3 +158,9 @@ func (r *ringBuffer) Close() error {
 	r.cond.Signal()
 	return nil
 }
+
+func (r *ringBuffer) IsClosed() bool {
+	r.m.RLock()
+	defer r.m.RUnlock()
+	return r.closed
+}

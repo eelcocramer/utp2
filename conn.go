@@ -142,7 +142,7 @@ func (c *Conn) listen() {
 func (c *Conn) send(p *packet) error {
 	if p.header.typ == stFin {
 		c.state = stateFinSent
-		c.sendBuf.Close()
+		c.closeSendBuf()
 	}
 	b, err := p.MarshalBinary()
 	if err != nil {
@@ -181,12 +181,12 @@ func (c *Conn) processPacket(p *packet) {
 			c.eos = int(p.header.seq)
 		}
 	case stReset:
-		c.sendBuf.Close()
-		c.recvBuf.Close()
+		c.closeRecvBuf()
+		c.closeSendBuf()
 	}
 
 	if c.eos >= 0 && c.eos == (int(c.ack)+1)%65536 {
-		c.recvBuf.Close()
+		c.closeRecvBuf()
 	}
 
 	fmt.Println("#", p)
@@ -211,6 +211,20 @@ func (c *Conn) sendRESET() {
 func (c *Conn) sendDATA(b []byte) (int, error) {
 	c.sendChan <- &frame{typ: stData, payload: b, dst: c.raddr}
 	return len(b), nil
+}
+
+func (c *Conn) closeRecvBuf() {
+	c.recvBuf.Close()
+	if c.sendBuf.IsClosed() && c.RawConn == c.conn {
+		c.conn.Close()
+	}
+}
+
+func (c *Conn) closeSendBuf() {
+	c.sendBuf.Close()
+	if c.recvBuf.IsClosed() && c.RawConn == c.conn {
+		c.conn.Close()
+	}
 }
 
 func (c *Conn) makePacket(f *frame) *packet {
