@@ -299,7 +299,7 @@ func (c *Conn) Close() error {
 	default:
 		close(c.closeChan)
 		c.sendFIN()
-		c.sendBuf.Close()
+		c.closeSendBuf()
 	}
 	return nil
 }
