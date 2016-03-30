@@ -53,6 +53,11 @@ type frame struct {
 	dst     *Addr
 }
 
+type state interface {
+	processPacket(c *Conn, p *packet) state
+	retry(c *Conn) state
+}
+
 func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
 	id := uint16(rand.Intn(math.MaxUint16))
 	c := &Conn{
