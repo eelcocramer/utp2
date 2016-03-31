@@ -56,6 +56,7 @@ type frame struct {
 type state interface {
 	processPacket(c *Conn, p *packet) state
 	retry(c *Conn) state
+	close() state
 }
 
 func newDialerConn(conn net.PacketConn, raddr *Addr) *Conn {
@@ -145,10 +146,6 @@ func (c *Conn) listen() {
 }
 
 func (c *Conn) send(p *packet) error {
-	if p.header.typ == stFin {
-		c.state = stateFinSent
-		c.closeSendBuf()
-	}
 	b, err := p.MarshalBinary()
 	if err != nil {
 		return err
@@ -157,6 +154,16 @@ func (c *Conn) send(p *packet) error {
 	if err != nil {
 		return err
 	}
+
+	switch p.header.typ {
+	case stFin:
+		c.state = stateFinSent
+		c.closeSendBuf()
+	case stReset:
+		c.closeRecvBuf()
+		c.closeSendBuf()
+	}
+
 	return nil
 }
 
@@ -304,7 +311,6 @@ func (c *Conn) Close() error {
 	default:
 		close(c.closeChan)
 		c.sendFIN()
-		c.closeSendBuf()
 	}
 	return nil
 }
