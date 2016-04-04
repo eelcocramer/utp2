@@ -191,6 +191,11 @@ func (c *Conn) processPacket(p *packet) {
 		}
 		c.sendBuf.EraseAll(p.header.ack)
 	case stFin:
+		if c.state == stateSynSent || c.state == stateSynRecv ||  c.state == stateConnected {
+			c.state = stateFinRecv1
+		} else if c.state == stateFinSent1 {
+			c.state = stateFinSent2
+		}
 		if c.eos < 0 {
 			c.eos = int(p.header.seq)
 		}
