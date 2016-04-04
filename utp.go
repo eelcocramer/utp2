@@ -18,8 +18,10 @@ const (
 	stateSynSent
 	stateSynRecv
 	stateConnected
-	stateFinSent
-	stateFinRecv
+	stateFinSent1
+	stateFinSent2
+	stateFinRecv1
+	stateFinRecv2
 
 	extNone         = 0
 	extSelectiveAck = 1

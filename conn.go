@@ -157,7 +157,7 @@ func (c *Conn) send(p *packet) error {
 
 	switch p.header.typ {
 	case stFin:
-		c.state = stateFinSent
+		c.state = stateFinSent1
 		c.closeSendBuf()
 		c.close()
 	case stReset:
@@ -179,9 +179,11 @@ func (c *Conn) processPacket(p *packet) {
 
 	switch p.header.typ {
 	case stData:
-		c.recvBuf.Put(p.payload, p.header.seq)
-		c.ack = c.recvBuf.Ack()
-		c.sendACK()
+		if c.state == stateConnected || c.state == stateFinSent1 ||  c.state == stateFinSent2 {
+			c.recvBuf.Put(p.payload, p.header.seq)
+			c.ack = c.recvBuf.Ack()
+			c.sendACK()
+		}
 	case stState:
 		if c.state == stateSynSent {
 			c.recvBuf.SetSeq(p.header.seq)
