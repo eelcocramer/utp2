@@ -15,7 +15,6 @@ const (
 	stSyn   = 4
 
 	stateClosed = iota
-	stateSendClosed
 	stateSynSent
 	stateSynRecv
 	stateConnected

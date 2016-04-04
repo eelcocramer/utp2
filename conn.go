@@ -159,9 +159,9 @@ func (c *Conn) send(p *packet) error {
 	case stFin:
 		c.state = stateFinSent
 		c.closeSendBuf()
+		c.close()
 	case stReset:
-		c.closeRecvBuf()
-		c.closeSendBuf()
+		c.reset()
 	}
 
 	return nil
@@ -193,8 +193,7 @@ func (c *Conn) processPacket(p *packet) {
 			c.eos = int(p.header.seq)
 		}
 	case stReset:
-		c.closeRecvBuf()
-		c.closeSendBuf()
+		c.reset()
 	}
 
 	if c.eos >= 0 && c.eos == (int(c.ack)+1)%65536 {
@@ -202,6 +201,13 @@ func (c *Conn) processPacket(p *packet) {
 	}
 
 	fmt.Println("#", p)
+}
+
+func (c *Conn) reset() {
+	c.state = stateClosed
+	c.closeRecvBuf()
+	c.closeSendBuf()
+	c.close()
 }
 
 func (c *Conn) sendSYN() {
@@ -301,6 +307,16 @@ func (c *Conn) Write(b []byte) (int, error) {
 	return l, nil
 }
 
+func (c *Conn) close() error {
+	select {
+	case <-c.closeChan:
+		return errClosing
+	default:
+		close(c.closeChan)
+	}
+	return nil
+}
+
 // Close closes the connection.
 func (c *Conn) Close() error {
 	if !c.ok() {
@@ -309,7 +325,6 @@ func (c *Conn) Close() error {
 	select {
 	case <-c.closeChan:
 	default:
-		close(c.closeChan)
 		c.sendFIN()
 	}
 	return nil
