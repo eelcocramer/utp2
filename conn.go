@@ -103,7 +103,7 @@ func newListenerConn(bcon *listenerBaseConn, p *packet) *Conn {
 		eos:       -1,
 	}
 	go c.loop()
-	c.sendACK()
+	c.processPacket(p)
 	return c
 }
 
@@ -209,7 +209,7 @@ func (c *Conn) processPacket(p *packet) {
 		c.closeRecvBuf()
 	}
 
-	if p.header.typ == stData || p.header.typ == stFin {
+	if p.header.typ == stSyn || p.header.typ == stData || p.header.typ == stFin {
 		c.sendACK()
 	}
 
