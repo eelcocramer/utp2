@@ -184,7 +184,6 @@ func (c *Conn) processPacket(p *packet) {
 		if c.state == stateConnected || c.state == stateFinSent1 ||  c.state == stateFinSent2 {
 			c.recvBuf.Put(p.payload, p.header.seq)
 			c.ack = c.recvBuf.Ack()
-			c.sendACK()
 		}
 	case stState:
 		if c.state == stateSynSent {
@@ -206,7 +205,12 @@ func (c *Conn) processPacket(p *packet) {
 	}
 
 	if c.eos >= 0 && c.eos == (int(c.ack)+1)%65536 {
+		c.ack = uint16(c.eos)
 		c.closeRecvBuf()
+	}
+
+	if p.header.typ == stData || p.header.typ == stFin {
+		c.sendACK()
 	}
 
 	fmt.Println("#", p)
@@ -334,6 +338,7 @@ func (c *Conn) Close() error {
 	select {
 	case <-c.closeChan:
 	default:
+		c.closeSendBuf()
 		c.sendFIN()
 	}
 	return nil

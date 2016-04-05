@@ -17,7 +17,6 @@ func main() {
 	var buf [256]byte
 	l, _ := c.Read(buf[:])
 	c.Write(buf[:l])
-	fmt.Println(buf[:l])
 	c.Close()
 	fmt.Println(c.Write(buf[:l]))
 	fmt.Println(c.Read(buf[:]))
