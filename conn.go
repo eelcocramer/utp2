@@ -157,9 +157,11 @@ func (c *Conn) send(p *packet) error {
 
 	switch p.header.typ {
 	case stFin:
-		c.state = stateFinSent1
-		c.closeSendBuf()
-		c.close()
+		if c.state == stateSynSent || c.state == stateSynRecv ||  c.state == stateConnected {
+			c.state = stateFinSent1
+			c.closeSendBuf()
+			c.close()
+		}
 	case stReset:
 		c.reset()
 	}
@@ -200,7 +202,7 @@ func (c *Conn) processPacket(p *packet) {
 			c.eos = int(p.header.seq)
 		}
 	case stReset:
-		c.reset()
+		c.sendRESET()
 	}
 
 	if c.eos >= 0 && c.eos == (int(c.ack)+1)%65536 {
